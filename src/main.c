@@ -41,6 +41,18 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(display_init());
 
+    // Everything the pages use from their create() must exist BEFORE ui_init:
+    // Browse submits the SD-manifest load while it builds, and with the job
+    // queue still null that submit was silently dropped, so a card-equipped
+    // panel sat empty until a table connected — exactly what the card is
+    // meant to make unnecessary. Jobs submitted during ui_init just block on
+    // the port lock until it is released.
+    ESP_ERROR_CHECK(jobs_init());
+    ESP_ERROR_CHECK(fw_client_init());
+    if (thr_preview_init() != ESP_OK) {
+        ESP_LOGW(TAG, "preview cache unavailable");
+    }
+
     lvgl_port_lock(0);
     theme_init();
     theme_set_dark(settings_get()->dark_mode);
@@ -50,11 +62,7 @@ void app_main(void)
     // First frame is built; light the panel
     ESP_ERROR_CHECK(board_backlight(true));
 
-    ESP_ERROR_CHECK(jobs_init());
-    ESP_ERROR_CHECK(fw_client_init());
-    if (thr_preview_init() != ESP_OK) {
-        ESP_LOGW(TAG, "preview cache unavailable");
-    }
+    // After ui_init: state's listeners touch widgets as soon as it polls.
     ESP_ERROR_CHECK(wifi_init());
     state_init();
 

@@ -561,30 +561,18 @@ lv_obj_t *page_now_playing_create(lv_obj_t *parent)
     lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(left, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t *arc = lv_arc_create(left);
-    lv_obj_set_size(arc, 340, 340);
-    lv_arc_set_rotation(arc, 270);
-    lv_arc_set_bg_angles(arc, 0, 360);
-    lv_arc_set_range(arc, 0, 100);
-    lv_arc_set_value(arc, 0);
-    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc, th.card, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(arc, th.accent, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
-    s_arc = arc;
-    s_arc_value = 0;
-
-    // The live pattern disc (preview rendered off-task, set by preview_job)
-    s_disc_img = lv_image_create(arc);
-    lv_obj_set_size(s_disc_img, PREVIEW_SIZE_PX, PREVIEW_SIZE_PX);
-    lv_obj_center(s_disc_img);
-    lv_obj_add_flag(s_disc_img, LV_OBJ_FLAG_HIDDEN);
+    // Disc and ring overlap in one stack, and the ARC IS CREATED LAST so the
+    // ring paints over the disc. The preview tile is a 300 px SQUARE whose
+    // corners are opaque th.bg out to r=212, while the ring sits at r=162..170;
+    // as a child of the arc (children draw after their parent's own parts)
+    // those corners buried the ring everywhere except within ~22 deg of each
+    // cardinal point, so it read as four disconnected segments (photo from
+    // Tuan, 2026-08-26). Do not re-parent these to the arc.
+    lv_obj_t *stack = plain(left);
+    lv_obj_set_size(stack, 340, 340);
 
     // Resting dish while idle / while the preview renders
-    lv_obj_t *dish = plain(arc);
+    lv_obj_t *dish = plain(stack);
     lv_obj_set_size(dish, 340 - 2 * 21, 340 - 2 * 21);
     lv_obj_center(dish);
     lv_obj_set_style_radius(dish, LV_RADIUS_CIRCLE, 0);
@@ -599,6 +587,30 @@ lv_obj_t *page_now_playing_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_dish_label, TH_FONT_CAPTION, 0);
     lv_obj_set_style_text_color(s_dish_label, th.text3, 0);
     lv_obj_center(s_dish_label);
+
+    // The live pattern disc (preview rendered off-task, set by preview_job)
+    s_disc_img = lv_image_create(stack);
+    lv_obj_set_size(s_disc_img, PREVIEW_SIZE_PX, PREVIEW_SIZE_PX);
+    lv_obj_center(s_disc_img);
+    lv_obj_add_flag(s_disc_img, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *arc = lv_arc_create(stack);
+    lv_obj_set_size(arc, 340, 340);
+    lv_obj_center(arc);
+    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, 0);  // the disc shows through
+    lv_arc_set_rotation(arc, 270);
+    lv_arc_set_bg_angles(arc, 0, 360);
+    lv_arc_set_range(arc, 0, 100);
+    lv_arc_set_value(arc, 0);
+    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, th.card, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, th.accent, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+    s_arc = arc;
+    s_arc_value = 0;
 
     // Right 45%: name, state, transport, speed — on surface with a left rule
     lv_obj_t *right = plain(body);

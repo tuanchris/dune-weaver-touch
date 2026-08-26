@@ -130,6 +130,15 @@ doubt, read the QML source — do not invent behavior.
 - Anything that pins a tile must bound how many are resident (182 px = 66 KB
   each). A page's worth is freed by the next `rebuild_grid`;
   `-DUI_DEBUG_PREVIEW_SCROLL` soak-tests that it stays flat.
+- **A bare `lv_obj` is CLICKABLE by default** — `plain()` clears SCROLLABLE, not
+  that. So a purely decorative container dropped inside a row you made
+  clickable (a text column, an icon wrapper) *swallows* the tap: it is hit
+  first, has no handler, and LVGL does not bubble unless you ask it to, so
+  the row never fires and nothing happens at all. Clear
+  `LV_OBJ_FLAG_CLICKABLE` on every `plain()` that sits on top of a touch
+  target. Symptom: the middle of a widget is dead while its margins work —
+  and no event fires anywhere, which reads like the input stack is broken
+  rather than like a hit-test that stopped one level too early.
 - **Batch widget updates under ONE `lvgl_port_lock`.** `full_refresh` makes any
   invalidation re-render all 1024×600, and the panel is 24 Hz, so N separate
   attaches cost N full redraws — measured at ~200 ms EACH, which is 4× the tile

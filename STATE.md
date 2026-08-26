@@ -1,5 +1,106 @@
 # STATE — 2026-08-26
 
+## Progress ring rendered as four segments (2026-08-26, photographed by Tuan)
+
+On the board the Now Playing ring showed as four disconnected arcs at 12/3/6/9
+o'clock with gaps on the diagonals. Not an arc-drawing bug — an occlusion:
+the preview tile is a 300 px **square** whose corners are opaque `th.bg` out
+to r=212 (`thr_preview_get`'s `corner`; tiles paint their own corners, they
+are never clipped), while the ring sits at r=162..170. `s_disc_img` and the
+placeholder dish were created as children of the **arc**, and LVGL draws a
+widget's own parts before its children, so the tile's corners painted over
+the ring. Geometry matches the photo exactly: the square's edge is 150 from
+centre at a cardinal and 212 at a diagonal, so the ring survives only within
+±22° of each cardinal — four ~44° segments.
+
+Fixed by putting dish, disc and arc in one 340×340 `stack` container with the
+**arc created last** (draws on top); arc bg forced transparent so the disc
+shows through. Sizes and styles otherwise unchanged. The stale comment on
+`preview_job` claiming the disc "sits directly on the page background" is now
+actually true. Verified in the sim by weaving a pattern: one continuous
+indicator arc + continuous track. Flashed to the board the same session —
+boot clean, 75 s soak with a live table, no fault — but the ring itself has
+only been confirmed by eye in the sim, so give the panel a look.
+
+Note for anyone reading a sim screenshot: the tile's corners look very
+slightly off-background there (16,16,16 vs 23,19,16). That is the ARGB8888
+`lv_snapshot_take` path, not a real mismatch — LVGL's `lv_color_to_u16()`
+truncates exactly like `ui_rgb565()`, so on the RGB565 panel the corners are
+bit-identical to `th.bg`.
+
+## Header table switcher: the chevron was decorative (2026-08-26, found by Tuan)
+
+Tuan: "nothing happens when clicking the drop down in header to select
+different table". Correct — `ui_page_header()` drew the dot, the name and a
+`TH_ICON_EXPAND_MORE` chevron with a comment claiming "the name is tappable
+(switch-table popup), like the reference", but no `LV_OBJ_FLAG_CLICKABLE` and
+no event callback were ever attached to any of them. Since the first
+increment the chevron has been a picture. The only way to change tables was
+the Control page's TABLES ON YOUR NETWORK card.
+
+Now implemented in `ui.c` against `ConnectionStatus.qml`, so every page's
+header gets it: dot+name+chevron are one clickable pill (pressed fill
+`th.pressed`), a tap drops a `SWITCH TABLE` card under the header listing the
+mDNS-discovered tables — name over URL, the connected one accent-bordered
+with a check and inert, any other connects with one tap. A fresh
+`discovery_scan` runs per open (the reference calls `refreshSerialPorts()`
+before `popup.open()`), so the list is never staler than the tap; the last
+result is kept across opens so a re-open paints instantly instead of blinking
+through "Searching your network for tables...". Tap outside or tap the pill
+again to dismiss.
+
+Sizing is the usual 1.5x: rows 84 (ref 56), card 450 wide (ref 300). The card
+sits at y=72 and must clear the nav bar at 600-64=536, so the list is capped
+at four rows (`TBL_LIST_MAX_H`) and anything beyond gets `ui_page_stepper` —
+built once with the popup and hidden when it does not overflow, because the
+stepper hangs callbacks holding its own heap state off the *scroller*, so
+delete/recreate per rebuild would leave them dangling.
+
+Verified in the UI sim by driving real clicks (cliclick + `sim/shot.py`):
+opens, lists 5 fake tables, marks the current one, stepper reaches the 5th,
+row tap re-targets `state_connect_url` (watched it move 8080 -> 8081 -> 8080
+in the log), outside-tap closes without leaking the tap to the Browse card
+underneath. Flashed; the panel boots and runs clean with it, but the popup
+has not yet been opened by finger on the board.
+
+### The bug under the bug: a `plain()` container ate every tap
+
+First cut looked right and was completely dead in the middle: taps inside the
+card produced *no* LVGL event at all — not the row, not the card, not the
+full-screen scrim — while taps on the scrim outside the card worked. Cause:
+each row holds a `plain()` column for the name+URL labels, and a bare
+`lv_obj` is `LV_OBJ_FLAG_CLICKABLE` by default (`plain()` only clears
+SCROLLABLE). That column spans most of the row, so it won hit-testing, had no
+handler, and LVGL does not bubble by default — the tap vanished silently.
+One `lv_obj_remove_flag(text, LV_OBJ_FLAG_CLICKABLE)` fixed it. Now a rule in
+CLAUDE.md; worth checking anywhere else a decorative container sits on a
+touch target.
+
+## Boot order: the SD fast path was dead (2026-08-26, found while checking)
+
+Every boot logged `E jobs: submit_to(67): jobs_init not called` exactly once
+and nobody had chased it. `app_main()` ran `ui_init()` *before* `jobs_init()`,
+and `page_browse_create()` calls `start_load(false)` when
+`sd_catalog_present()` — so that submit hit a null queue, `start_load` reset
+`s_loading` and, being `user_initiated=false`, said nothing. The card load
+then only happened later via `on_state_changed` once a table connected, which
+defeats the entire point of the card ("makes Browse independent of the
+table"): a card-equipped panel with no reachable table showed an empty Browse
+forever.
+
+Fixed by moving `jobs_init` + `fw_client_init` + `thr_preview_init` above the
+`ui_init` block in both `src/main.c` and `sim/main_sim.c` (jobs submitted
+during `ui_init` simply block on the port lock until it is released; `wifi_init`
+and `state_init` stay after, since state's listeners touch widgets). Sim log
+now shows `loaded 1232 patterns (SD manifest)` *before* `state: connected`,
+and the error line is gone.
+
+Confirmed on the board after flashing: `jobs: workers up` at 1.3 s, the 1232
+patterns off the card at 4.0 s — ahead of WiFi association (5.6 s) and the
+table connect (7.8 s) — `dune-weaver-touch up` at 4.4 s, and no `submit_to`
+error anywhere in the boot chain. Browse is now populated before the panel
+has a network at all, which is what the card was for.
+
 ## Browse page fill: 2.0 s -> 0.4 s, MEASURED on the board (2026-08-26)
 
 Tuan, after the 4-bit mask change: "did pattern preview run faster? i feel like

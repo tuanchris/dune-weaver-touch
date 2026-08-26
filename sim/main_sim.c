@@ -131,6 +131,13 @@ int main(void)
     // Same order as app_main() in src/main.c.
     ESP_ERROR_CHECK(settings_init());
 
+    // Same order as app_main(): pages submit jobs from their create().
+    ESP_ERROR_CHECK(jobs_init());
+    ESP_ERROR_CHECK(fw_client_init());
+    if (thr_preview_init() != ESP_OK) {
+        ESP_LOGW(TAG, "preview cache unavailable");
+    }
+
     lvgl_port_lock(0);
     theme_init();
     theme_set_dark(settings_get()->dark_mode);
@@ -143,11 +150,6 @@ int main(void)
     ui_init();
     lvgl_port_unlock();
 
-    ESP_ERROR_CHECK(jobs_init());
-    ESP_ERROR_CHECK(fw_client_init());
-    if (thr_preview_init() != ESP_OK) {
-        ESP_LOGW(TAG, "preview cache unavailable");
-    }
     ESP_ERROR_CHECK(wifi_init());
     state_init();
 

@@ -1,5 +1,13 @@
 #include "ui.h"
 
+#include <string.h>
+
+#include "esp_lvgl_port.h"
+
+#include "app/jobs.h"
+#include "app/state.h"
+#include "net/discovery.h"
+#include "net/settings.h"
 #include "pages/pages.h"
 #include "screen_sleep.h"
 #include "theme.h"
@@ -143,6 +151,241 @@ lv_obj_t *ui_page_root(lv_obj_t *parent)
     return page;
 }
 
+// --- Table switcher (the header's dot + name + chevron) --------------------
+// ConnectionStatus.qml: the pill is tappable and drops a list of the tables
+// mDNS can see, one tap to jump between them. The chevron has been drawn
+// since the first increment but was never wired to anything, so tapping it
+// did nothing at all (found 2026-08-26). A fresh browse runs per open, like
+// the reference's refreshSerialPorts() before popup.open().
+
+#define TBL_MAX 8
+#define TBL_ROW_H 84    // 1.5x the reference's 56, like every other token
+#define TBL_POPUP_W 450 // 1.5x its 300
+// Four rows. The card sits at y=72 and must clear the nav bar (600 -
+// TH_NAV_HEIGHT = 536): 72 + 36 pad + ~24 label + 12 gap + 372 = ~516. Any
+// taller and the last row hides behind the nav; more than four gets a stepper.
+#define TBL_LIST_MAX_H (4 * TBL_ROW_H + 3 * TH_SPACE_SM)
+
+static lv_obj_t *s_tbl_scrim;
+static lv_obj_t *s_tbl_body;
+static lv_obj_t *s_tbl_list;
+static lv_obj_t *s_tbl_hint;
+static lv_obj_t *s_tbl_stepper;
+static table_info_t s_tbl[TBL_MAX];
+static int s_tbl_count;   // kept across opens: a re-open shows the last list at once
+static bool s_tbl_scanning;
+
+static void tbl_close(void)
+{
+    if (s_tbl_scrim != NULL) {
+        lv_obj_delete(s_tbl_scrim);  // the DELETE cb clears the statics
+    }
+}
+
+static void tbl_scrim_deleted(lv_event_t *e)
+{
+    (void)e;
+    s_tbl_scrim = NULL;
+    s_tbl_body = NULL;
+    s_tbl_list = NULL;
+    s_tbl_hint = NULL;
+    s_tbl_stepper = NULL;
+}
+
+static void tbl_scrim_clicked(lv_event_t *e)
+{
+    // CloseOnPressOutside: only a tap on the scrim itself, never one that
+    // bubbled up from the card.
+    if (lv_event_get_target_obj(e) == lv_event_get_current_target_obj(e)) {
+        tbl_close();
+    }
+}
+
+static void tbl_row_clicked(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx >= 0 && idx < s_tbl_count) {
+        state_connect_url(s_tbl[idx].url);
+    }
+    tbl_close();
+}
+
+// Repopulate the open popup from s_tbl. LVGL lock held, popup open.
+static void tbl_rebuild(void)
+{
+    lv_obj_clean(s_tbl_list);
+
+    state_lock();
+    bool connected = state_get()->conn == CONN_CONNECTED;
+    state_unlock();
+    const char *current = settings_get()->table_url;
+
+    for (int i = 0; i < s_tbl_count; i++) {
+        bool is_current = connected && strcmp(s_tbl[i].url, current) == 0;
+
+        lv_obj_t *row = plain(s_tbl_list);
+        lv_obj_set_size(row, LV_PCT(100), TBL_ROW_H);
+        lv_obj_set_style_radius(row, TH_RADIUS_SM, 0);
+        lv_obj_set_style_bg_color(row, is_current ? th.accent_soft : th.card, 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_border_color(row, is_current ? th.accent : th.border_light, 0);
+        lv_obj_set_style_pad_hor(row, TH_SPACE_MD, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(row, TH_SPACE_SM, 0);
+        if (!is_current) {
+            lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_bg_color(row, th.pressed, LV_STATE_PRESSED);
+            lv_obj_add_event_cb(row, tbl_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        }
+
+        lv_obj_t *text = plain(row);
+        lv_obj_set_height(text, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(text, 1);
+        lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
+        // A bare lv_obj is CLICKABLE by default, and this one covers most of
+        // the row: leave it set and it eats the tap silently (no handler, no
+        // bubbling) and the row never fires. Cost me an afternoon.
+        lv_obj_remove_flag(text, LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t *name = lv_label_create(text);
+        lv_label_set_text(name, s_tbl[i].name[0] != '\0' ? s_tbl[i].name : s_tbl[i].url);
+        lv_obj_set_width(name, LV_PCT(100));
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(name, TH_FONT_BODY, 0);
+        lv_obj_set_style_text_color(name, th.text, 0);
+
+        lv_obj_t *url = lv_label_create(text);
+        lv_label_set_text(url, s_tbl[i].url);
+        lv_obj_set_width(url, LV_PCT(100));
+        lv_label_set_long_mode(url, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(url, TH_FONT_EYEBROW, 0);
+        lv_obj_set_style_text_color(url, th.text3, 0);
+
+        if (is_current) {
+            lv_obj_t *check = lv_label_create(row);
+            lv_label_set_text(check, TH_ICON_CHECK);
+            lv_obj_set_style_text_font(check, TH_FONT_BODY, 0);
+            lv_obj_set_style_text_color(check, th.accent, 0);
+        }
+    }
+
+    // The stepper is built once with the popup and only shown when the list
+    // overruns: ui_page_stepper hangs callbacks holding its own state off the
+    // scroller, so delete/recreate per rebuild would leave them dangling.
+    if (s_tbl_stepper != NULL) {
+        int content = s_tbl_count * (TBL_ROW_H + TH_SPACE_SM) - TH_SPACE_SM;
+        if (content > TBL_LIST_MAX_H) {
+            lv_obj_remove_flag(s_tbl_stepper, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_tbl_stepper, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    if (s_tbl_count > 0) {
+        lv_obj_remove_flag(s_tbl_body, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_tbl_hint, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text(s_tbl_hint,
+                          s_tbl_scanning ? "Searching your network for tables..."
+                                         : "No tables found. Open Control to enter an address.");
+        lv_obj_add_flag(s_tbl_body, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_tbl_hint, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void tbl_scan_job(void *arg)
+{
+    (void)arg;
+    table_info_t *found = calloc(TBL_MAX, sizeof(*found));
+    int n = -1;
+    if (found != NULL && discovery_init() == ESP_OK) {
+        n = discovery_scan(found, TBL_MAX, 3000);
+    }
+
+    lvgl_port_lock(0);
+    s_tbl_scanning = false;
+    if (n >= 0) {
+        s_tbl_count = n;
+        if (n > 0) {
+            memcpy(s_tbl, found, (size_t)n * sizeof(*found));
+        }
+    }
+    if (s_tbl_scrim != NULL) {  // still open?
+        tbl_rebuild();
+    }
+    lvgl_port_unlock();
+    free(found);
+}
+
+static void table_switch_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (s_tbl_scrim != NULL) {
+        tbl_close();  // a second tap on the pill dismisses it
+        return;
+    }
+
+    s_tbl_scrim = plain(lv_layer_top());
+    lv_obj_set_size(s_tbl_scrim, LV_PCT(100), LV_PCT(100));
+    lv_obj_add_flag(s_tbl_scrim, LV_OBJ_FLAG_CLICKABLE);  // catch taps outside
+    lv_obj_add_event_cb(s_tbl_scrim, tbl_scrim_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_tbl_scrim, tbl_scrim_deleted, LV_EVENT_DELETE, NULL);
+
+    lv_obj_t *card = plain(s_tbl_scrim);
+    lv_obj_set_width(card, TBL_POPUP_W);
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_pos(card, TH_SPACE_LG, TH_HEADER_HEIGHT + TH_SPACE_SM);
+    lv_obj_set_style_bg_color(card, th.surface, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, TH_RADIUS_MD, 0);
+    lv_obj_set_style_border_color(card, th.border, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_pad_all(card, TH_SPACE_MD, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(card, TH_SPACE_SM, 0);
+
+    lv_obj_t *section = lv_label_create(card);
+    lv_label_set_text(section, "SWITCH TABLE");
+    lv_obj_set_style_text_font(section, TH_FONT_EYEBROW, 0);
+    lv_obj_set_style_text_color(section, th.text3, 0);
+
+    s_tbl_body = plain(card);
+    lv_obj_set_width(s_tbl_body, LV_PCT(100));
+    lv_obj_set_height(s_tbl_body, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_tbl_body, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_tbl_body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_tbl_body, TH_SPACE_SM, 0);
+
+    s_tbl_list = plain(s_tbl_body);
+    lv_obj_set_flex_grow(s_tbl_list, 1);
+    lv_obj_set_height(s_tbl_list, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(s_tbl_list, TBL_LIST_MAX_H, 0);
+    lv_obj_set_flex_flow(s_tbl_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_tbl_list, TH_SPACE_SM, 0);
+
+    s_tbl_stepper = ui_page_stepper(s_tbl_body, s_tbl_list);
+    if (s_tbl_stepper != NULL) {
+        lv_obj_set_height(s_tbl_stepper, LV_SIZE_CONTENT);
+        lv_obj_add_flag(s_tbl_stepper, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    s_tbl_hint = lv_label_create(card);
+    lv_obj_set_width(s_tbl_hint, LV_PCT(100));
+    lv_label_set_long_mode(s_tbl_hint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(s_tbl_hint, TH_FONT_CAPTION, 0);
+    lv_obj_set_style_text_color(s_tbl_hint, th.text3, 0);
+
+    // Fresh browse while the list shows (refreshSerialPorts).
+    if (!s_tbl_scanning && jobs_submit(tbl_scan_job, NULL) == ESP_OK) {
+        s_tbl_scanning = true;
+    }
+    tbl_rebuild();
+}
+
 lv_obj_t *ui_page_header(lv_obj_t *page, const char *title)
 {
     lv_obj_t *header = plain(page);
@@ -157,20 +400,32 @@ lv_obj_t *ui_page_header(lv_obj_t *page, const char *title)
     lv_obj_set_style_pad_hor(header, TH_SPACE_LG, 0);
     lv_obj_set_style_pad_column(header, TH_SPACE_MD, 0);
 
-    // Connection dot + table name (wired to live state in a later increment)
-    lv_obj_t *dot = plain(header);
+    // Connection dot + table name + chevron are ONE pill, and the pill is the
+    // touch target that opens the table switcher (ConnectionStatus.qml).
+    lv_obj_t *sw = plain(header);
+    lv_obj_set_size(sw, LV_SIZE_CONTENT, TH_HEADER_HEIGHT);
+    lv_obj_set_style_radius(sw, TH_RADIUS_PILL, 0);
+    lv_obj_set_style_pad_hor(sw, TH_SPACE_SM, 0);
+    lv_obj_set_flex_flow(sw, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(sw, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(sw, TH_SPACE_XS, 0);
+    lv_obj_add_flag(sw, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(sw, th.pressed, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(sw, table_switch_clicked, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *dot = plain(sw);
     lv_obj_set_size(dot, 14, 14);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(dot, th.danger, 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
 
-    lv_obj_t *name = lv_label_create(header);
+    lv_obj_t *name = lv_label_create(sw);
     lv_label_set_text(name, "No table");
     lv_obj_set_style_text_font(name, TH_FONT_CAPTION, 0);
     lv_obj_set_style_text_color(name, th.text2, 0);
 
-    // Chevron: the name is tappable (switch-table popup), like the reference.
-    lv_obj_t *chev = lv_label_create(header);
+    lv_obj_t *chev = lv_label_create(sw);
     lv_label_set_text(chev, TH_ICON_EXPAND_MORE);
     lv_obj_set_style_text_font(chev, TH_FONT_CAPTION, 0);
     lv_obj_set_style_text_color(chev, th.text3, 0);
