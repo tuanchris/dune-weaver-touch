@@ -1,0 +1,17 @@
+.pio/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+sdkconfig.waveshare-5b*
+.vscode/
+__pycache__/
+tools/sim_data/
+sim/build/
+sim/simfs/
+secrets.h
+wifi_secrets.ini
+.DS_Store
+sim/shot_layer*.raw
+sim/shot.req
+sim/shot.done
