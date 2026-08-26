@@ -3,8 +3,10 @@
 #include "board/board.h"
 #include "board/display.h"
 #include "board/sdcard.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_timer.h"
 #include "net/fw_client.h"
 #include "net/settings.h"
 #include "net/wifi.h"
@@ -13,6 +15,20 @@
 #include "ui/ui.h"
 
 static const char *TAG = "app";
+
+// Internal RAM is this device's scarcest resource (a starved WiFi driver
+// storms "wifi:m f null" at beacon rate) — keep a heartbeat of the numbers
+// on the console so exhaustion is visible before it bites.
+#define HEAP_REPORT_PERIOD_US (10 * 1000 * 1000)
+
+static void heap_report_cb(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "heap: internal free=%u largest=%u | psram free=%u KB",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+}
 
 void app_main(void)
 {
@@ -37,10 +53,19 @@ void app_main(void)
     ESP_ERROR_CHECK(jobs_init());
     ESP_ERROR_CHECK(fw_client_init());
     if (thr_preview_init() != ESP_OK) {
-        ESP_LOGW(TAG, "preview cache unavailable (storage partition)");
+        ESP_LOGW(TAG, "preview cache unavailable");
     }
     ESP_ERROR_CHECK(wifi_init());
     state_init();
+
+    const esp_timer_create_args_t heap_args = {
+        .callback = heap_report_cb,
+        .name = "heap_report",
+    };
+    esp_timer_handle_t heap_timer = NULL;
+    if (esp_timer_create(&heap_args, &heap_timer) == ESP_OK) {
+        esp_timer_start_periodic(heap_timer, HEAP_REPORT_PERIOD_US);
+    }
 
     ESP_LOGI(TAG, "dune-weaver-touch up");
 }

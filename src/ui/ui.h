@@ -41,3 +41,19 @@ lv_obj_t *ui_keyboard_create(lv_obj_t *parent);
 
 // Centered icon + title + hint placeholder (grid/list empty states).
 lv_obj_t *ui_empty_state(lv_obj_t *parent, const char *symbol, const char *title, const char *hint);
+
+// Turn a scrolling container into a PAGED one. Kills the drag gesture on
+// `scroller` (dragging redraws all 1024x600 every frame on this panel — see
+// PORTING_NOTES §6) and returns a narrow column of Up/Down buttons, created
+// in `parent`, that step it one viewport at a time. The arrows dim when
+// there is nothing further that way, and follow content changes.
+// The column is TH_TOUCH_TARGET wide plus padding; give `parent` a row flow
+// and let the scroller flex-grow beside it.
+lv_obj_t *ui_page_stepper(lv_obj_t *parent, lv_obj_t *scroller);
+
+// Theme colour -> packed RGB565, for the raw pixel buffers preview tiles use
+// (thr_preview_get's `corner`).
+static inline uint16_t ui_rgb565(lv_color_t c)
+{
+    return (uint16_t)(((c.red >> 3) << 11) | ((c.green >> 2) << 5) | (c.blue >> 3));
+}

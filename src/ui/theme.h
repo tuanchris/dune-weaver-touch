@@ -24,8 +24,8 @@
 // Hit targets / chrome
 #define TH_TOUCH_TARGET 72
 #define TH_CONTROL_HEIGHT 84
-#define TH_HEADER_HEIGHT 90
-#define TH_NAV_HEIGHT 96
+#define TH_HEADER_HEIGHT 60
+#define TH_NAV_HEIGHT 64
 #define TH_KEYBOARD_HEIGHT 280
 
 // Type scale (QML 12/14/17/24 x 1.5): Outfit Regular/SemiBold merged with the
@@ -89,6 +89,13 @@ typedef struct {
     lv_color_t ok_soft;
     lv_color_t danger;
     lv_color_t danger_pressed;
+    // Preview dish. Card tiles are bare 4-bit coverage masks (PORTING_NOTES
+    // §7a), so these three are what thr_preview.c composites them through —
+    // which is why retheming no longer needs the card re-prepped. The night
+    // values are exactly what tiles used to bake, so nothing shifts.
+    lv_color_t preview_dish;
+    lv_color_t preview_ring;
+    lv_color_t preview_sand;
 } theme_colors_t;
 
 // Active palette (night by default; theme_set_dark(false) switches to day)

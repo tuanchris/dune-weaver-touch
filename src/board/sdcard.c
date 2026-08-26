@@ -37,7 +37,9 @@ esp_err_t sdcard_mount(void)
             .sclk_io_num = SD_GPIO_SCK,
             .quadwp_io_num = -1,
             .quadhd_io_num = -1,
-            .max_transfer_sz = 4096,
+            // A preview tile is 83-180 KB; at 4096 that was 20-45 separate
+            // DMA transactions per tile, all per-transaction overhead.
+            .max_transfer_sz = 65536,
         };
         ESP_RETURN_ON_ERROR(spi_bus_initialize(SD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO),
                             TAG, "spi bus");
@@ -48,6 +50,11 @@ esp_err_t sdcard_mount(void)
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SD_SPI_HOST;
+    // 40 MHz instead of the 20 MHz default. SPI-mode data blocks carry a
+    // CRC16 the driver verifies, so if the wiring can't hold this the failure
+    // is a loud read error (missing previews), not silent garbage — drop back
+    // to SDMMC_FREQ_DEFAULT if tiles start failing.
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
 
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.host_id = SD_SPI_HOST;

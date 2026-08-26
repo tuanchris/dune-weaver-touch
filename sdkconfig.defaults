@@ -15,7 +15,12 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# 0 = every plain malloc prefers PSRAM (internal only as fallback, and never
+# below the reserve). With the old 4096, the LVGL widget tree + cJSON parse
+# of a 1200-pattern table exhausted internal RAM to <1 KB free and the WiFi
+# driver storm-failed beacon buffers ("wifi:m f null") — measured 2026-08-25,
+# heap heartbeat in main.c. WiFi/DMA allocs are caps-explicit and unaffected.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 
 # Required for RGB-panel DMA out of PSRAM

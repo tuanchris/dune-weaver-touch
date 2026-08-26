@@ -221,6 +221,9 @@ static lv_obj_t *plain(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
+    // LVGL makes every object scrollable by default; nothing in this UI is
+    // dragged (ui_page_stepper re-enables the ones it drives). See ui.h.
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 
@@ -920,10 +923,9 @@ lv_obj_t *page_light_create(lv_obj_t *parent)
     // ---- Left column (~42%): light state + per-effect appearance ----
     lv_obj_t *left = plain(body);
     lv_obj_set_height(left, LV_PCT(100));
-    lv_obj_set_flex_grow(left, 42);
+    lv_obj_set_flex_grow(left, 48);
     lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scroll_dir(left, LV_DIR_VER);
-    lv_obj_set_style_pad_all(left, TH_SPACE_LG, 0);
+    lv_obj_set_style_pad_all(left, TH_SPACE_MD, 0);
     lv_obj_set_style_pad_row(left, TH_SPACE_MD, 0);
 
     // TABLE LIGHT card
@@ -996,13 +998,14 @@ lv_obj_t *page_light_create(lv_obj_t *parent)
 
     s_speed_row = make_slider_row(s_card_appear, "Speed", 132, 1, 255, &s_ctl_speed);
 
+    ui_page_stepper(body, left);  // paged, not dragged (see ui.h)
+
     // ---- Right column: effect catalogue + ball tracker ----
     s_right_col = plain(body);
     lv_obj_set_height(s_right_col, LV_PCT(100));
-    lv_obj_set_flex_grow(s_right_col, 58);
+    lv_obj_set_flex_grow(s_right_col, 52);
     lv_obj_set_flex_flow(s_right_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scroll_dir(s_right_col, LV_DIR_VER);
-    lv_obj_set_style_pad_all(s_right_col, TH_SPACE_LG, 0);
+    lv_obj_set_style_pad_all(s_right_col, TH_SPACE_MD, 0);
     lv_obj_set_style_pad_row(s_right_col, TH_SPACE_MD, 0);
 
     // EFFECT card (full catalogue minus 'ball' — it has its own card)
@@ -1125,6 +1128,8 @@ lv_obj_t *page_light_create(lv_obj_t *parent)
     make_swatch_row(s_bg_color_row, true, s_sw_bg);
 
     s_bg_bright_row = make_slider_row(s_ball_controls, "Bg brightness", 150, 0, 255, &s_ctl_bgb);
+
+    ui_page_stepper(body, s_right_col);
 
     state_add_listener(on_state_changed);
     refresh_all();  // initial no-ring look: notice only, right column hidden

@@ -69,6 +69,9 @@ static lv_obj_t *s_manual_btn;
 static table_info_t s_tables[MAX_TABLES];
 static int s_table_count;
 static bool s_discovering;
+static bool s_auto_scanned;  // first scan fires on WiFi-up, not on a tap
+static bool start_discovery(void);
+
 
 // ---- Table card (Home/Center/Edge/Restart, gated on CONN_CONNECTED) ----
 typedef enum { ACT_HOME = 0, ACT_CENTER, ACT_EDGE, ACT_RESTART, ACT_COUNT } table_act_t;
@@ -93,6 +96,9 @@ static lv_obj_t *plain(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
+    // LVGL makes every object scrollable by default; nothing in this UI is
+    // dragged (ui_page_stepper re-enables the ones it drives). See ui.h.
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 
@@ -262,6 +268,10 @@ static void ta_clicked(lv_event_t *e)
 static lv_obj_t *make_textarea(lv_obj_t *parent, const char *placeholder, bool password)
 {
     lv_obj_t *ta = lv_textarea_create(parent);
+    // No scrollbar: nothing in this UI scrolls, and a one-line field whose
+    // text is a hair taller than its content box would otherwise sprout one.
+    lv_obj_set_scrollbar_mode(ta, LV_SCROLLBAR_MODE_OFF);
+
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_password_mode(ta, password);
     lv_textarea_set_placeholder_text(ta, placeholder);
@@ -356,6 +366,12 @@ static void on_wifi_event(bool connected)
     lvgl_port_lock(0);
     if (connected) {
         s_joining = false;
+        // Scan once as soon as there is a network to scan. Discovery used to
+        // run ONLY on a Refresh tap, so the card sat on "No tables found"
+        // until you thought to press it — it looked like discovery was broken.
+        if (!s_auto_scanned) {
+            s_auto_scanned = start_discovery();
+        }
     }
     wifi_row_refresh();
     lvgl_port_unlock();
@@ -681,7 +697,8 @@ static void table_connect_clicked(lv_event_t *e)
     }
 }
 
-// Rebuild discovery rows. LVGL lock must be held.
+// Rebuild discovery rows. LVGL lock must be held. `n` is what the scan saw,
+// BEFORE the connected table is filtered out of it.
 static void rebuild_table_list(const table_info_t *found, int n)
 {
     // Filter the currently connected table (it already sits in the card above)
@@ -715,6 +732,13 @@ static void rebuild_table_list(const table_info_t *found, int n)
         lv_obj_remove_flag(s_tables_list, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_tables_empty, LV_OBJ_FLAG_HIDDEN);
     } else {
+        // "Found nothing" and "the only table out there is the one you are
+        // already on" are very different messages; the old text claimed the
+        // first for both, which reads as a discovery failure on a one-table
+        // network.
+        lv_label_set_text(s_tables_empty,
+                          (n > 0) ? "That's every table on your network - you're connected to it."
+                                  : "No tables found. Tap Refresh, or enter the address below.");
         lv_obj_add_flag(s_tables_list, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_tables_empty, LV_OBJ_FLAG_HIDDEN);
     }
@@ -741,18 +765,26 @@ static void discovery_job(void *arg)
     free(found);
 }
 
-static void refresh_clicked(lv_event_t *e)
+// LVGL context. Returns false if the scan could not be queued.
+static bool start_discovery(void)
 {
-    (void)e;
     if (s_discovering) {
-        return;
+        return true;
     }
     if (jobs_submit(discovery_job, NULL) != ESP_OK) {
-        show_queue_full();
-        return;
+        return false;
     }
     s_discovering = true;
     lv_label_set_text(s_refresh_label, "Scanning...");
+    return true;
+}
+
+static void refresh_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (!start_discovery()) {
+        show_queue_full();
+    }
 }
 
 static void manual_ta_changed(lv_event_t *e)
@@ -1017,11 +1049,15 @@ static void autoplay_show_picker(const fw_str_list_t *list)
     if (rows_h > 340) {
         rows_h = 340;
     }
-    lv_obj_t *rows = plain(card);
-    lv_obj_set_size(rows, LV_PCT(100), rows_h);
+    lv_obj_t *rows_row = plain(card);
+    lv_obj_set_size(rows_row, LV_PCT(100), rows_h);
+    lv_obj_set_flex_flow(rows_row, LV_FLEX_FLOW_ROW);
+    lv_obj_t *rows = plain(rows_row);
+    lv_obj_set_height(rows, LV_PCT(100));
+    lv_obj_set_flex_grow(rows, 1);
     lv_obj_set_flex_flow(rows, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(rows, TH_SPACE_SM, 0);
-    lv_obj_set_scroll_dir(rows, LV_DIR_VER);
+    ui_page_stepper(rows_row, rows);
 
     for (int i = 0; i < list->count; i++) {
         char name[64];
@@ -1325,34 +1361,29 @@ lv_obj_t *page_control_create(lv_obj_t *parent)
     lv_obj_t *page = ui_page_root(parent);
     ui_page_header(page, "Control");
 
-    // One vertically scrolling body holding both columns (QML ScrollView)
-    lv_obj_t *body = plain(page);
-    lv_obj_set_width(body, LV_PCT(100));
+    // Every card spans the full width, one per row, stepped by the Up/Down
+    // column on the right — deliberately different from the QML reference's
+    // two-column ScrollView, and never dragged (Tuan's direction, 2026-08-25).
+    lv_obj_t *row = plain(page);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_flex_grow(row, 1);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+
+    lv_obj_t *body = plain(row);
+    lv_obj_set_height(body, LV_PCT(100));
     lv_obj_set_flex_grow(body, 1);
-    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_hor(body, TH_SPACE_LG, 0);
     lv_obj_set_style_pad_ver(body, TH_SPACE_MD, 0);
-    lv_obj_set_style_pad_column(body, TH_SPACE_LG, 0);
+    lv_obj_set_style_pad_row(body, TH_SPACE_LG, 0);
 
-    lv_obj_t *left = plain(body);
-    lv_obj_set_width(left, LV_PCT(47));
-    lv_obj_set_height(left, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(left, TH_SPACE_LG, 0);
+    build_wifi_card(body);
+    build_conn_card(body);
+    build_tables_card(body);
+    build_table_card(body);
+    build_screen_card(body);
 
-    lv_obj_t *right = plain(body);
-    lv_obj_set_flex_grow(right, 1);
-    lv_obj_set_height(right, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(right, TH_SPACE_LG, 0);
-
-    build_wifi_card(left);
-    build_conn_card(left);
-    build_tables_card(left);
-    build_table_card(right);
-    build_screen_card(right);
+    ui_page_stepper(row, body);
 
     // ui_init() runs before state_init()/wifi_init() (see main.c), so these
     // only record callbacks; the first events arrive once those tasks start.

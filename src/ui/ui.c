@@ -34,6 +34,9 @@ static lv_obj_t *plain(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
+    // LVGL makes every object scrollable by default; nothing in this UI is
+    // dragged (ui_page_stepper re-enables the ones it drives). See ui.h.
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 
@@ -80,7 +83,7 @@ static lv_obj_t *make_tab_button(lv_obj_t *nav, int idx)
     lv_obj_set_height(btn, LV_PCT(100));
     lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(btn, TH_SPACE_XS, 0);
+    lv_obj_set_style_pad_row(btn, 4, 0);  // icon+label must fit TH_NAV_HEIGHT
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(btn, tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
 
@@ -238,6 +241,204 @@ lv_obj_t *ui_pill_button(lv_obj_t *parent, const char *text, lv_color_t color, b
 // is the stock light one — jarring against the night palette). One recipe
 // for every page: 280 px tall, bottom-aligned in its parent, surface ground,
 // card keys, amber-tinted control keys.
+// ---------------------------------------------------------- paged scrolling
+
+typedef struct {
+    lv_obj_t *scroller;
+    lv_obj_t *up;
+    lv_obj_t *down;
+} ui_stepper_t;
+
+// A snapped element sits this far below the top edge — smaller than the gap
+// between elements, so the previous one stays fully off-screen.
+#define SNAP_INSET TH_SPACE_XS
+
+static void stepper_refresh(ui_stepper_t *st)
+{
+    lv_obj_set_style_text_color(lv_obj_get_child(st->up, 0),
+                                lv_obj_get_scroll_top(st->scroller) > 0 ? th.text : th.text3, 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(st->down, 0),
+                                lv_obj_get_scroll_bottom(st->scroller) > 0 ? th.text : th.text3, 0);
+}
+
+// Distance of a child's top edge from the top of the scroller's BOX,
+// independent of where it is scrolled to right now. Box, not content box:
+// LVGL clips children to the bounding box, so anything scrolled into the
+// padding band is still drawn — measuring against the content box leaves a
+// sliver of the previous element peeking in above the one you snapped to.
+static int32_t child_offset(lv_obj_t *scroller, lv_obj_t *child)
+{
+    lv_area_t sc;
+    lv_area_t cc;
+    lv_obj_get_coords(scroller, &sc);
+    lv_obj_get_coords(child, &cc);
+    return cc.y1 - sc.y1 + lv_obj_get_scroll_y(scroller);
+}
+
+// Step a whole VIEWPORT but land on an element boundary, so a tap never
+// leaves a card sliced in half at the top of the screen.
+//   down: go to the last child that still starts inside the current view, so
+//         the first clipped card becomes the first full one — advances as far
+//         as possible without skipping anything.
+//   up:   the mirror — the earliest child that is still within one viewport
+//         back, so you retreat a full screen where the content allows it.
+// A single element taller than the viewport has no boundary to snap to, so
+// both directions fall back to a plain viewport step and scroll through it.
+static void stepper_clicked(lv_event_t *e)
+{
+    ui_stepper_t *st = lv_event_get_user_data(e);
+    bool up = (lv_event_get_current_target_obj(e) == st->up);
+    int32_t vh = lv_obj_get_height(st->scroller);
+    int32_t cur = lv_obj_get_scroll_y(st->scroller);
+    // Compare against the element offset currently AT the top edge, not the
+    // raw scroll position: the two differ by SNAP_INSET, and searching from
+    // the raw one re-selects the element already at the top, which lands you
+    // back where you started — a dead stop partway down a long list.
+    int32_t anchor = cur + SNAP_INSET;
+    int32_t best = 0;
+    int32_t next = 0;  // nearest element below the fold, however far
+    bool found = false;
+    bool have_next = false;
+
+    uint32_t n = lv_obj_get_child_count(st->scroller);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(st->scroller, i);
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+            continue;
+        }
+        int32_t off = child_offset(st->scroller, child);
+        if (up) {
+            if (off < anchor && off >= anchor - vh && (!found || off < best)) {
+                best = off;
+                found = true;
+            }
+        } else {
+            if (off > anchor && (!have_next || off < next)) {
+                next = off;
+                have_next = true;
+            }
+            if (off > anchor && off <= anchor + vh - 1 && (!found || off > best)) {
+                best = off;
+                found = true;
+            }
+        }
+    }
+
+    int32_t target;
+    if (found) {
+        target = best - SNAP_INSET;
+    } else {
+        target = up ? cur - vh : cur + vh;  // element taller than the viewport
+        // ...but never scroll past the top of whatever comes next.
+        if (!up && have_next && next - SNAP_INSET < target) {
+            target = next - SNAP_INSET;
+        }
+    }
+    if (target < 0) {
+        target = 0;
+    }
+    if (target == cur) {
+        target = up ? cur - vh : cur + vh;  // never stall
+    }
+    lv_obj_scroll_by_bounded(st->scroller, 0, cur - target, LV_ANIM_OFF);
+    stepper_refresh(st);
+}
+
+static void stepper_content_changed(lv_event_t *e)
+{
+    stepper_refresh(lv_event_get_user_data(e));
+}
+
+static void stepper_deleted(lv_event_t *e)
+{
+    lv_free(lv_event_get_user_data(e));
+}
+
+static lv_obj_t *stepper_btn(lv_obj_t *parent, const char *glyph, ui_stepper_t *st)
+{
+    lv_obj_t *btn = plain(parent);
+    lv_obj_set_size(btn, TH_TOUCH_TARGET, TH_TOUCH_TARGET);
+    lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
+    // A filled disc, so the arrows read as buttons rather than as decoration
+    // floating in the margin.
+    lv_obj_set_style_bg_color(btn, th.card, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(btn, th.border, 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_bg_color(btn, th.pressed, LV_STATE_PRESSED);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn, stepper_clicked, LV_EVENT_CLICKED, st);
+
+    lv_obj_t *icon = lv_label_create(btn);
+    lv_label_set_text(icon, glyph);
+    lv_obj_set_style_text_font(icon, TH_FONT_BODY, 0);
+    lv_obj_set_style_text_color(icon, th.text3, 0);
+    lv_obj_center(icon);
+    return btn;
+}
+
+#ifdef UI_DEBUG_STEP
+// Hands-free stepper check: drive one scroller's Down button and log where it
+// got to, so "the end of a long list is unreachable" is testable without a
+// finger. Set UI_DEBUG_STEP_TAB to pick the page.
+#include "esp_log.h"
+static void debug_step_tick(lv_timer_t *t)
+{
+    static bool navigated;
+    if (!navigated) {
+        navigated = true;
+        ui_navigate_to(UI_DEBUG_STEP_TAB);
+        return;
+    }
+    ui_stepper_t *st = lv_timer_get_user_data(t);
+    if (!lv_obj_is_visible(st->scroller)) {
+        return;
+    }
+    ESP_LOGI("ui_dbg", "step: y=%d top=%d bottom=%d", (int)lv_obj_get_scroll_y(st->scroller),
+             (int)lv_obj_get_scroll_top(st->scroller),
+             (int)lv_obj_get_scroll_bottom(st->scroller));
+    if (lv_obj_get_scroll_bottom(st->scroller) <= 0) {
+        lv_obj_scroll_to_y(st->scroller, 0, LV_ANIM_OFF);
+    } else {
+        lv_obj_send_event(st->down, LV_EVENT_CLICKED, NULL);
+    }
+}
+#endif
+
+lv_obj_t *ui_page_stepper(lv_obj_t *parent, lv_obj_t *scroller)
+{
+    // Keep LV_OBJ_FLAG_SCROLLABLE (lv_obj_scroll_by needs the scroll bounds)
+    // but take every direction away from the indev, so a drag does nothing.
+    lv_obj_add_flag(scroller, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(scroller, LV_DIR_NONE);
+
+    ui_stepper_t *st = lv_malloc(sizeof(*st));
+    if (st == NULL) {
+        return NULL;
+    }
+    st->scroller = scroller;
+
+    lv_obj_t *col = plain(parent);
+    lv_obj_set_size(col, TH_TOUCH_TARGET + 2 * TH_SPACE_XS, LV_PCT(100));
+    lv_obj_remove_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(col, TH_SPACE_MD, 0);
+
+    st->up = stepper_btn(col, LV_SYMBOL_UP, st);
+    st->down = stepper_btn(col, LV_SYMBOL_DOWN, st);
+    lv_obj_add_event_cb(col, stepper_deleted, LV_EVENT_DELETE, st);
+    // Content arriving later (a list rebuild) changes what is reachable.
+    lv_obj_add_event_cb(scroller, stepper_content_changed, LV_EVENT_CHILD_CHANGED, st);
+    lv_obj_add_event_cb(scroller, stepper_content_changed, LV_EVENT_SIZE_CHANGED, st);
+    stepper_refresh(st);
+#ifdef UI_DEBUG_STEP
+    lv_timer_create(debug_step_tick, 1200, st);
+#endif
+    return col;
+}
+
 lv_obj_t *ui_keyboard_create(lv_obj_t *parent)
 {
     lv_obj_t *kb = lv_keyboard_create(parent);
@@ -260,11 +461,18 @@ lv_obj_t *ui_keyboard_create(lv_obj_t *parent)
     lv_obj_set_style_shadow_width(kb, 0, LV_PART_ITEMS);
     lv_obj_set_style_text_color(kb, th.text, LV_PART_ITEMS);
     lv_obj_set_style_text_font(kb, TH_FONT_BODY, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(kb, th.pressed, LV_PART_ITEMS | LV_STATE_PRESSED);
+    // A key press flashes accent. th.pressed was the obvious choice but it is
+    // only ~9/255 per channel away from th.card — invisible at a glance, and
+    // the fingertip covers the key anyway, so the confirmation has to be big
+    // enough to read from the edges.
+    lv_obj_set_style_bg_color(kb, th.accent, LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(kb, th.on_accent, LV_PART_ITEMS | LV_STATE_PRESSED);
     // Control keys (shift, ?123, ok, backspace) carry LV_STATE_CHECKED.
     lv_obj_set_style_bg_color(kb, th.accent_soft, LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_text_color(kb, th.accent, LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(kb, th.pressed, LV_PART_ITEMS | LV_STATE_CHECKED | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(kb, th.accent, LV_PART_ITEMS | LV_STATE_CHECKED | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(kb, th.on_accent,
+                                LV_PART_ITEMS | LV_STATE_CHECKED | LV_STATE_PRESSED);
     return kb;
 }
 

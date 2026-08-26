@@ -320,6 +320,12 @@ FILE *sim_fopen(const char *path, const char *mode)
     return fopen(remap(path, buf, sizeof(buf)), mode);
 }
 
+int sim_open(const char *path, int flags)
+{
+    char buf[768];
+    return open(remap(path, buf, sizeof(buf)), flags);
+}
+
 int sim_stat(const char *path, struct stat *st)
 {
     char buf[768];

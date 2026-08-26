@@ -85,6 +85,9 @@ static lv_obj_t *plain(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
+    // LVGL makes every object scrollable by default; nothing in this UI is
+    // dragged (ui_page_stepper re-enables the ones it drives). See ui.h.
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 
@@ -261,7 +264,9 @@ static void preview_job(void *arg)
 {
     preview_req_t *req = arg;
     const lv_image_dsc_t *dsc = NULL;
-    esp_err_t err = thr_preview_get(req->rel, PREVIEW_SIZE_PX, &dsc);
+    // The disc sits directly on the page background (the dish below is a
+    // sibling placeholder, not a parent), so paint the tile's corners th.bg.
+    esp_err_t err = thr_preview_get(req->rel, PREVIEW_SIZE_PX, ui_rgb565(th.bg), &dsc);
 
     lvgl_port_lock(0);
     if (req->gen != s_preview_gen) {
@@ -273,9 +278,14 @@ static void preview_job(void *arg)
         set_hidden(s_dish, true);
         thr_preview_release(s_disc_dsc);  // unpin what the disc showed before
         s_disc_dsc = dsc;
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        // The card has no tile for this pattern: permanent, so leave
+        // s_requested set and keep showing the plain dish. No retry, no log
+        // line every 10 s.
+        thr_preview_release(dsc);
     } else {
         ESP_LOGW(TAG, "preview %s failed: 0x%x", req->rel, err);
-        // Transient (fetch) failure: allow a retry, but not before 10 s.
+        // No card / read fault: allow a retry, but not before 10 s.
         strlcpy(s_failed_rel, req->rel, sizeof(s_failed_rel));
         s_failed_at = lv_tick_get();
         s_requested[0] = '\0';
@@ -578,7 +588,6 @@ lv_obj_t *page_now_playing_create(lv_obj_t *parent)
     lv_obj_set_size(dish, 340 - 2 * 21, 340 - 2 * 21);
     lv_obj_center(dish);
     lv_obj_set_style_radius(dish, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_clip_corner(dish, true, 0);  // square preview -> circle
     lv_obj_set_style_bg_color(dish, th.surface, 0);
     lv_obj_set_style_bg_opa(dish, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(dish, th.border, 0);

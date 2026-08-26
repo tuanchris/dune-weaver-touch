@@ -180,17 +180,31 @@ Green 5cb85c→00ff00, Cyan 5cb8b8→00ffff, Blue 5c7cc4→0000ff, Purple
   coordinates) — also the hook for screen-sleep wake.
 
 ## 6. Previews (.thr → image)
+
+**The panel does not render previews.** Since 2026-08-26 tiles come off the
+pattern TF card only (§7a) — no rasterizer, no `.thr` fetching, no flash
+cache, no `storage` partition. The rules below describe the *reference*
+pipeline and the card-prep tool (`tools/make_pattern_sd.py`), which is where
+rendering now lives.
+
 - `.thr` = text lines `theta_radians rho_0..1`; theta signed/unbounded
   (multi-turn), rho clamp to [0,1]; skip blanks/`#`; files run 2k–36k points.
 - Transform: `x = cx + rho*R*cos(theta)`, `y = cy + rho*R*sin(theta)`.
-- Look: transparent corners, dish fill `#1b1712` + ring `#3e362c`, stroke
-  sand `#d8b578`, stroke ~2 px at 512 (Pi renders 2048 supersampled + LANCZOS;
-  on-device: direct draw at target size, decimate points < ~0.5 px apart).
-- Pi caches by `sha1(file)[:10]` + renderer version; board serves files at
-  30–60 KB/s so cache aggressively (LittleFS `storage` partition) and fetch
-  with concurrency 1, render off the LVGL task.
-- Distinguish "definitively unrenderable" (cache the failure) from "transient
-  fetch failure" (retry ×3, 10 s apart, then leave uncached).
+- Look: dish fill `#1b1712` + ring `#3e362c`, stroke sand `#d8b578`, stroke
+  ~2 px at 512 (Pi renders 2048 supersampled + LANCZOS; the card tool
+  supersamples ×4 + LANCZOS to match). The stroke **scales with tile size** —
+  a flat 2 px at 204 is 2.5× the spec and closes the gaps between adjacent
+  passes, turning fine patterns into solid discs.
+- Since 2026-08-26 those three colours live in the FIRMWARE, as
+  `th.preview_dish/ring/sand` (night values are the hexes above, so nothing
+  shifted). Card tiles are bare coverage masks; the tool renders geometry
+  only. The dish rim is antialiased on device with a 1 px ramp in
+  `base_tile_get` rather than by supersampling — a hard edge there reads as a
+  visibly jagged circle (measured 32/255 along the whole circumference).
+- Why the panel gave it up: the board serves `.thr` at 30–60 KB/s, so a
+  1200-pattern library took hours to populate and shared one wire mutex with
+  the status poll, and the LittleFS tile cache spent 10 MB of flash storing
+  what the card already ships.
 
 ## 7a. Panel-local pattern SD card (ESP32 addition, 2026-08-25)
 
@@ -202,18 +216,146 @@ dune-weaver-mobile way:
 - `/patterns.json` — manifest, same JSON-array format as `/sand_patterns`
   (which itself serves the table card's `/patterns/index.json` verbatim when
   present). SD manifest wins; `/sand_patterns` is the no-card fallback.
-- `/previews/<key>.bin` — raw little-endian RGB565 300×300 (180,000 B),
+- `/previews/<key>.bin` — a 300×300 **4-bit alpha mask**, exactly 45,000 B.
   `key` = pattern basename lowercased incl. ".thr" (mobile's previewKey:
   basename matching makes previews cross-table). Prepared by
-  `tools/make_pattern_sd.py`; byte-compatible with the LittleFS render cache.
-- Preview lookup order: RAM LRU → SD tile → LittleFS cache → fetch+render.
-- No card ⇒ Browse shows a complaint banner and falls back to the network
-  path; a card inserted after boot is picked up on the next Browse refresh
-  (weak `sdcard_remount` hook in sd_catalog).
-- Browse builds cards in chunks of 48 behind a "Show more" tile: real tables
-  carry 1000+ patterns and a card per pattern exhausts internal RAM
-  (SPIRAM_MALLOC_ALWAYSINTERNAL=4096 puts every small LVGL alloc there),
-  starving the WiFi driver — the 2026-08-25 red-dot bug.
+  `tools/make_pattern_sd.py` — from a local `.thr` library, or with
+  `--from-bundle` from a dune-weaver-website Pattern Manager export
+  (previews.json + shard-*.zip of 512 px `.thr.webp` alpha masks).
+  **ONE folder, ONE size.** The per-size `previews@<N>/` directories are gone
+  (2026-08-26): the panel resamples the single mask to whatever a widget
+  displays at, and doing that on one 8-bit channel is cheap (~3 ms for
+  300 → 160) where resampling three packed RGB565 channels was ~20.
+- A tile carries **coverage only** — no colour, no dish, no ring. The panel
+  builds the dish from `th.preview_dish/ring/sand` and composites the mask
+  through it (`thr_preview.c` `base_tile_get` + `composite_tile`). Two
+  consequences worth keeping straight: retheming needs no card re-prep (it
+  needs `thr_preview_clear_ram()`, which drops the cached dish bases), and
+  the card's look is now a firmware decision, not a card decision.
+  Nibble order is low-first: byte i holds pixel 2i low, 2i+1 high; 0 = bare
+  dish, 15 = full sand. Row-major, no header, no padding.
+- **The file length IS the format check.** There is no magic number and no
+  version field: `sd_preview_load` `fstat`s and rejects anything that is not
+  `size*size/2`. A card written for older firmware (300 px RGB565 =
+  180,000 B) therefore shows placeholder dishes everywhere; the firmware logs
+  one warning naming the expected length rather than 1200 silent misses.
+- Preview lookup order: RAM LRU → the card's mask, resampled + composited.
+  That is the whole list. There is no fallback and no second size.
+- Measured: 45,000 B beats the old 180,000 B master AND the 51,200 B 160 px
+  RGB565 tile, so this is smaller than either previous layout while feeding
+  every widget at full quality. 4-bit quantisation lands within 6/255 of an
+  8-bit composite — under the RGB565 step of 8 the panel quantises to anyway.
+- **Tiles paint their own corners, so nothing is ever masked.** The area
+  outside the dish is filled with the colour of whatever the image sits on
+  (`thr_preview_get`'s `corner`: `th.surface` in the grid, `th.bg` for the
+  detail overlay and Now Playing), and the widgets set `radius` but NOT
+  `clip_corner`. This matters a lot: LVGL renders a clipped object's children
+  through two ARGB8888 layers plus a rounded-rect mask every frame
+  (`lv_refr.c` — for a circle the "middle" band is empty, so the whole tile
+  goes through it), i.e. ~166 KB of 32-bit layer traffic per card per frame.
+  Corner colour is part of the LRU key. `ui_rgb565()` does the conversion;
+  the match is exact because the draw buffer is RGB565 too.
+- Errors are two kinds: `ESP_ERR_NOT_FOUND` (card in, no tile for this
+  pattern) is permanent — show the plain dish, never retry.
+  `ESP_ERR_INVALID_STATE` (no card) is retryable after a 10 s backoff.
+- No card ⇒ Browse shows a complaint banner, still lists patterns from
+  `/sand_patterns`, and every card keeps its placeholder dish. A card
+  inserted after boot is picked up on the next Browse refresh (weak
+  `sdcard_remount` hook in sd_catalog).
+- **Browse is PAGED, not scrolled** (2026-08-26, deliberate deviation from
+  the QML reference's scrolling grid). `full_refresh` + `avoid_tearing` means
+  every frame of a drag redraws all 1024×600, so scrolling is the most
+  expensive thing the UI can do while a static page costs nothing; a page tap
+  spends one redraw instead. It also removes momentum throw, the catch-tap
+  that used to select a pattern mid-slide, and any need to unload off-screen
+  tiles — a page is 8 cards (4×2) and rebuilding frees them.
+  Up/Down buttons sit in a `PAGER_W` column down the RIGHT of the grid (not
+  in the header): they page a vertical list, so they read as up/down, and
+  putting them beside the content keeps them under the thumb. The header
+  carries only the "1-8 of 1232" range label.
+  Rows are measured from the grid's real height, not hardcoded, because the
+  SD-complaint banner steals a row's worth of space when it is up.
+  `-DUI_DEBUG_PREVIEW_SCROLL` steps pages and logs tile residency.
+  Tiles load a PAGE per job and attach under ONE `lvgl_port_lock` so LVGL
+  coalesces the invalidations into a single redraw — attaching them one at a
+  time cost ~200 ms each (measured), four times the tile load it hid behind.
+  Once the page is complete the loader warms page N+1 into the RAM LRU
+  (`PV_KIND_PREFETCH`: load, then release immediately so it stays cached
+  unpinned), which makes a Next tap one redraw instead of a page of reads.
+  Visible cards always win the jobs lane over a prefetch.
+- Header and nav bars are 72 px each (were 90/96), which is what buys the
+  160 px preview: 600 − 72 − 72 = 456. Anything placed in a header must fit
+  that — the search pill and round buttons are 56.
+- **NOTHING in this UI scrolls by dragging** (2026-08-26). Every page's
+  `plain()` clears `LV_OBJ_FLAG_SCROLLABLE` (LVGL sets it on every object by
+  default), and any region whose content overflows gets `ui_page_stepper()`:
+  it keeps the flag but sets `LV_DIR_NONE` — the indev then finds no scroll
+  target (`lv_indev_scroll.c:327,343`) while `lv_obj_scroll_by` still works,
+  since that has no flag check. The stepper builds an Up/Down column beside
+  the content and steps one viewport per tap, dimming at the ends and
+  following content changes (CHILD_CHANGED/SIZE_CHANGED). Used by: Control
+  body, both Light columns, all three Playlists regions, and the two modal
+  pickers. Browse is different — it rebuilds a page of cards, which also
+  bounds tile memory.
+- Sim caveat: `sim/shim/sim_remap.h` must remap every file call the device
+  code uses. It rewrites `fopen`/`open`/`stat`/`unlink`/`rename`/`mkdir`;
+  add to it when new ones appear, or the sim silently reads the host root.
+- Browse never builds a card per pattern. Real tables carry 1000+, and one
+  card each exhausted internal RAM and starved the WiFi driver — the
+  2026-08-25 red-dot bug. Two independent fixes stand: paging (a page is 8
+  cards, never more) and `SPIRAM_MALLOC_ALWAYSINTERNAL=0`, which moves the
+  LVGL widget tree and cJSON parse nodes to PSRAM. The interim "Show more"
+  48-card chunking is gone — paging replaced it.
+
+## 7b. What the web Pattern Manager must emit (OPEN — not built yet)
+
+Today a card is prepped on a Mac: the dune-weaver-website Pattern Manager
+exports 512 px `.thr.webp` alpha masks in shard zips, and
+`tools/make_pattern_sd.py --from-bundle` composites them into the §7a
+layout. **The goal is for the web interface to emit a panel-ready card
+directly**, so a user never runs a Python script. Whatever generates it must
+satisfy the §7a contract exactly — the firmware does zero decoding, so a
+wrong byte count is a silent missing tile, not an error message:
+
+- **One directory, `previews/`, one size.** Not `previews@<N>/` — those were
+  removed 2026-08-26. The panel resamples the single mask to whatever a
+  widget needs.
+- **Packed 4-bit alpha, no header, no compression.** 300×300 → exactly
+  45,000 B. `sd_preview_load` `fstat`s and rejects any other length as
+  `ESP_ERR_NOT_FOUND`, so the length is the entire format negotiation: get it
+  wrong and the panel shows placeholder dishes with one log line. No PNG, no
+  WebP, no BMP — the panel has no decoder and deliberately ships none (§6).
+  Nibble order low-first (byte i = pixel 2i low, 2i+1 high), row-major,
+  0 = bare dish, 15 = full sand.
+- **Coverage only — no colour, no dish, no ring, no background.** The panel
+  owns the look (`th.preview_dish/ring/sand`). An exporter that bakes colour
+  in would break night/day retheming and would not match the panel's palette
+  anyway. Geometry is the one thing that must line up: the pattern's rho=1
+  maps to the dish edge at radius `size/2 - margin`, `margin = size*12/512`,
+  so the mask occupies a `size - 2*margin` inset and is zero outside it.
+  Stroke width **scales with tile size** (~2 px at 512); a flat stroke turns
+  small tiles into solid discs.
+- **Key = pattern basename, lowercased, `.thr` kept**, `.bin` appended:
+  `sub/Star.thr` → `star.thr.bin`. Basename-only is deliberate (mobile's
+  `previewKey`) so a preview follows a pattern across folders and tables. It
+  also means two patterns sharing a basename share one tile — 65 of Tuan's
+  1232 do, and that is accepted behaviour, not a bug.
+- Skip macOS `._*` AppleDouble files when writing to FAT — they collide with
+  real keys and the tool filters them for this reason.
+
+Good news for the web side: the Pattern Manager's existing 512 px
+`.thr.webp` exports are **already alpha masks of exactly this kind**. Turning
+one into a tile is resample-into-the-inset then pack to 4 bits — strictly
+less work than the old RGB565 compositing. `render_bundle_tile()` in
+`tools/make_pattern_sd.py` is ~10 lines and is the reference implementation
+to port.
+
+Still open, and worth doing before this ships to users: packing all tiles
+into one indexed blob would remove the per-file `open()` in a 1167-entry FAT
+directory (measured 1–15 ms each), which is now a real share of the per-tile
+cost. That changes the layout again, so decide it before asking anyone to
+re-prep a 1232-pattern card. Analysis: STATE.md "Preview load speed: where
+the time actually goes".
 
 ## 7. Fonts / icons
 Target fonts (bundled in the Pi repo's `fonts/`): Outfit Regular/Medium/

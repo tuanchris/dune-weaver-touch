@@ -100,6 +100,9 @@ static lv_obj_t *plain(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
+    // LVGL makes every object scrollable by default; nothing in this UI is
+    // dragged (ui_page_stepper re-enables the ones it drives). See ui.h.
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 
@@ -507,6 +510,10 @@ static void create_modal_open(lv_event_t *e)
     modal_title(card, "New playlist");
 
     lv_obj_t *ta = lv_textarea_create(card);
+    // No scrollbar: nothing in this UI scrolls, and a one-line field whose
+    // text is a hair taller than its content box would otherwise sprout one.
+    lv_obj_set_scrollbar_mode(ta, LV_SCROLLBAR_MODE_OFF);
+
     s_modal_ta = ta;
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_placeholder_text(ta, "Playlist name");
@@ -1108,13 +1115,18 @@ static void build_list_view(lv_obj_t *page)
     lv_obj_set_style_text_color(plus, th.on_accent, 0);
     lv_obj_center(plus);
 
-    s_list_cont = plain(s_list_view);
-    lv_obj_set_width(s_list_cont, LV_PCT(100));
+    lv_obj_t *list_row = plain(s_list_view);
+    lv_obj_set_width(list_row, LV_PCT(100));
+    lv_obj_set_flex_grow(list_row, 1);
+    lv_obj_set_flex_flow(list_row, LV_FLEX_FLOW_ROW);
+
+    s_list_cont = plain(list_row);
+    lv_obj_set_height(s_list_cont, LV_PCT(100));
     lv_obj_set_flex_grow(s_list_cont, 1);
     lv_obj_set_flex_flow(s_list_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(s_list_cont, TH_SPACE_LG, 0);
     lv_obj_set_style_pad_row(s_list_cont, TH_SPACE_MD, 0);
-    lv_obj_set_scroll_dir(s_list_cont, LV_DIR_VER);
+    ui_page_stepper(list_row, s_list_cont);
 
     ui_empty_state(s_list_cont, TH_ICON_MUSIC_NOTE, "No playlists yet",
                    "Tap + to gather patterns into a set\nthe table can weave through");
@@ -1175,12 +1187,17 @@ static void build_detail_view(lv_obj_t *page)
 
     eyebrow(left, "PATTERNS");
 
-    s_det_list_cont = plain(left);
-    lv_obj_set_width(s_det_list_cont, LV_PCT(100));
+    lv_obj_t *det_row = plain(left);
+    lv_obj_set_width(det_row, LV_PCT(100));
+    lv_obj_set_flex_grow(det_row, 1);
+    lv_obj_set_flex_flow(det_row, LV_FLEX_FLOW_ROW);
+
+    s_det_list_cont = plain(det_row);
+    lv_obj_set_height(s_det_list_cont, LV_PCT(100));
     lv_obj_set_flex_grow(s_det_list_cont, 1);
     lv_obj_set_flex_flow(s_det_list_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_det_list_cont, TH_SPACE_SM, 0);
-    lv_obj_set_scroll_dir(s_det_list_cont, LV_DIR_VER);
+    ui_page_stepper(det_row, s_det_list_cont);
 
     lv_obj_t *divider = plain(content);
     lv_obj_set_size(divider, 1, LV_PCT(100));
@@ -1205,13 +1222,18 @@ static void build_detail_view(lv_obj_t *page)
     lv_obj_set_size(s_chip_shuffle, 165, TH_CONTROL_HEIGHT); // QML 110 x 1.5
     lv_obj_add_event_cb(s_chip_shuffle, shuffle_clicked, LV_EVENT_CLICKED, NULL);
 
-    // Scrollable settings
-    lv_obj_t *scroll = plain(right);
-    lv_obj_set_width(scroll, LV_PCT(100));
+    // Settings, stepped rather than scrolled
+    lv_obj_t *scroll_row = plain(right);
+    lv_obj_set_width(scroll_row, LV_PCT(100));
+    lv_obj_set_flex_grow(scroll_row, 1);
+    lv_obj_set_flex_flow(scroll_row, LV_FLEX_FLOW_ROW);
+
+    lv_obj_t *scroll = plain(scroll_row);
+    lv_obj_set_height(scroll, LV_PCT(100));
     lv_obj_set_flex_grow(scroll, 1);
     lv_obj_set_flex_flow(scroll, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(scroll, TH_SPACE_MD, 0);
-    lv_obj_set_scroll_dir(scroll, LV_DIR_VER);
+    ui_page_stepper(scroll_row, scroll);
 
     eyebrow(scroll, "PLAY ORDER");
     lv_obj_t *mode_row = chip_row(scroll);

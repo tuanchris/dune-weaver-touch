@@ -22,6 +22,9 @@ static void apply_night(void)
     th.ok_soft = lv_color_hex(0x28301f);
     th.danger = lv_color_hex(0xc65a33);
     th.danger_pressed = lv_color_hex(0xa84a28);
+    th.preview_dish = lv_color_hex(0x1b1712);
+    th.preview_ring = lv_color_hex(0x3e362c);
+    th.preview_sand = lv_color_hex(0xd8b578);
 }
 
 static void apply_day(void)
@@ -43,6 +46,13 @@ static void apply_day(void)
     th.ok_soft = lv_color_hex(0xe2e6d2);
     th.danger = lv_color_hex(0xb0431d);
     th.danger_pressed = lv_color_hex(0x8f3517);
+    // NEW and not yet reviewed against the reference app: day-mode previews
+    // never existed before (tiles baked the night dish, so day mode showed
+    // night previews). Dark strokes on a light dish is the honest inversion;
+    // eyeball it on glass before treating these as settled.
+    th.preview_dish = lv_color_hex(0xe8e1d0);
+    th.preview_ring = lv_color_hex(0xd2c7ae);
+    th.preview_sand = lv_color_hex(0x8a6a3a);
 }
 
 void theme_init(void)

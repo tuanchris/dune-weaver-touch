@@ -68,6 +68,51 @@ static void maybe_snapshot(void)
     }
 }
 
+// DWT_SIM_PREVIEW_SELFTEST=<pattern.thr>: pull that pattern's tile at every
+// size the UI asks for, dump each as a raw RGB565 next to the shot files, and
+// exit. Exists because the 300 px path (Now Playing, the Browse detail
+// overlay) is only reachable by tapping, so it would otherwise go unverified
+// on a card-format change — and a format change is exactly when you want to
+// see both sizes decoded. sim/check_tiles.py renders the dumps.
+static int preview_selftest(const char *rel)
+{
+    if (thr_preview_init() != ESP_OK) {
+        ESP_LOGE(TAG, "selftest: thr_preview_init failed");
+        return 1;
+    }
+    const int sizes[] = { 160, 300 };  // CARD_PREVIEW_PX, DETAIL_SRC_PX
+    const char *dir = getenv("DWT_SIM_SHOT_DIR");
+    if (dir == NULL) {
+        dir = "sim";
+    }
+    int rc = 0;
+    for (int i = 0; i < 2; i++) {
+        const lv_image_dsc_t *dsc = NULL;
+        // Same corner each page uses: the grid sits on a card, the big
+        // previews on the page background.
+        uint16_t corner = ui_rgb565(sizes[i] == 160 ? th.surface : th.bg);
+        esp_err_t err = thr_preview_get(rel, sizes[i], corner, &dsc);
+        if (err != ESP_OK || dsc == NULL) {
+            ESP_LOGE(TAG, "selftest: %s at %d -> %s", rel, sizes[i],
+                     esp_err_to_name(err));
+            rc = 1;
+            continue;
+        }
+        char path[512];
+        snprintf(path, sizeof(path), "%s/selftest_%d.raw", dir, sizes[i]);
+        FILE *f = fopen(path, "wb");
+        if (f != NULL) {
+            fwrite(dsc->data, 1, dsc->data_size, f);
+            fclose(f);
+        }
+        ESP_LOGI(TAG, "selftest: %s at %d -> %ux%u, %u B -> %s", rel, sizes[i],
+                 (unsigned)dsc->header.w, (unsigned)dsc->header.h,
+                 (unsigned)dsc->data_size, path);
+        thr_preview_release(dsc);
+    }
+    return rc;
+}
+
 int main(void)
 {
     lv_init();
@@ -89,6 +134,12 @@ int main(void)
     lvgl_port_lock(0);
     theme_init();
     theme_set_dark(settings_get()->dark_mode);
+    const char *selftest = getenv("DWT_SIM_PREVIEW_SELFTEST");
+    if (selftest != NULL) {
+        int rc = preview_selftest(selftest);  // needs the theme, not the UI
+        lvgl_port_unlock();
+        return rc;
+    }
     ui_init();
     lvgl_port_unlock();
 

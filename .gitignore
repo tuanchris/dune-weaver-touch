@@ -15,3 +15,4 @@ wifi_secrets.ini
 sim/shot_layer*.raw
 sim/shot.req
 sim/shot.done
+sim/selftest_*.raw

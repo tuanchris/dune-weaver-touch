@@ -1,5 +1,6 @@
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x6000,
 phy_init, data, phy,     0xf000,   0x1000,
+# No data partition: previews live on the TF card, not in flash (2026-08-26).
+# The ~10 MB above factory is unallocated, kept free for the OTA pair.
 factory,  app,  factory, 0x10000,  0x600000,
-storage,  data, spiffs,  0x610000, 0x9F0000,
