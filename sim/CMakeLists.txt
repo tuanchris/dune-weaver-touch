@@ -41,6 +41,7 @@ add_executable(dwt_sim
     stub/wifi_stub.c
     stub/discovery_stub.c
     stub/board_stub.c
+    stub/ota_stub.c
     vendor/cJSON.c
     ${DEVICE_SRC}
     ${LVGL_SRC}

@@ -8,6 +8,7 @@
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "net/fw_client.h"
+#include "net/ota.h"
 #include "net/settings.h"
 #include "net/wifi.h"
 #include "render/thr_preview.h"
@@ -66,6 +67,13 @@ void app_main(void)
     ESP_ERROR_CHECK(wifi_init());
     state_init();
 
+    // Binds INADDR_ANY, so it can start before the STA has an address and
+    // needs no re-bind across reconnects (the one wifi_set_event_cb slot
+    // belongs to the Control page).
+    if (ota_init() != ESP_OK) {
+        ESP_LOGW(TAG, "update server unavailable - OTA disabled this boot");
+    }
+
     const esp_timer_create_args_t heap_args = {
         .callback = heap_report_cb,
         .name = "heap_report",
@@ -75,5 +83,11 @@ void app_main(void)
         esp_timer_start_periodic(heap_timer, HEAP_REPORT_PERIOD_US);
     }
 
-    ESP_LOGI(TAG, "dune-weaver-touch up");
+    // Everything above came up, so if this boot is the first after an update,
+    // keep it. Left uncalled, the bootloader would revert to the previous slot
+    // on the next reset -- which is what should happen to an image that panics
+    // before reaching here, and must NOT happen to one that works.
+    ota_mark_valid();
+
+    ESP_LOGI(TAG, "dune-weaver-touch up (fw=%s)", ota_version());
 }

@@ -1,23 +1,34 @@
-// Desktop stub for net/wifi.h: the host Mac IS the network. Always connected,
-// join/scan succeed instantly with plausible fakes.
+// Desktop stub for net/wifi.h: the host Mac IS the network. Connected by
+// default, join/scan succeed instantly with plausible fakes.
+//
+// Set DWT_SIM_WIFI=off to start disconnected instead. The offline path is not
+// otherwise reachable here, and it is a real layout: Control moves the WIFI
+// card to the top when the panel has no network. Joining still "succeeds", so
+// one run covers both orders.
 #include "net/wifi.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static wifi_event_cb_t s_cb;
+static bool s_connected = true;
 
 esp_err_t wifi_init(void)
 {
+    const char *env = getenv("DWT_SIM_WIFI");
+    if (env != NULL && (strcmp(env, "off") == 0 || strcmp(env, "0") == 0)) {
+        s_connected = false;
+    }
     if (s_cb != NULL) {
-        s_cb(true);
+        s_cb(s_connected);
     }
     return ESP_OK;
 }
 
 bool wifi_is_connected(void)
 {
-    return true;
+    return s_connected;
 }
 
 const char *wifi_ip(void)
@@ -29,6 +40,7 @@ esp_err_t wifi_join(const char *ssid, const char *pass)
 {
     (void)ssid;
     (void)pass;
+    s_connected = true;
     if (s_cb != NULL) {
         s_cb(true);
     }

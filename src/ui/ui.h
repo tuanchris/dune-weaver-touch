@@ -19,6 +19,10 @@ void ui_navigate_to(int tab);
 // be held. name NULL/"" renders as "No table".
 void ui_set_connection(bool connected, const char *name);
 
+// Show/hide a small dot on a tab's icon — currently only Control, when a
+// firmware update is waiting. LVGL lock must be held.
+void ui_set_tab_badge(int tab, bool on);
+
 // Themed modal error popup (single OK button). LVGL lock must be held.
 // Message should already be the friendly text (fw_friendly_error + prefix).
 void ui_show_error(const char *msg);

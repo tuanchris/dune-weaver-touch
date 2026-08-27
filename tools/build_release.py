@@ -42,7 +42,14 @@ IMAGES = [
     # name,         offset,     source filename in .pio/build/<env>/
     ("bootloader", "0x0", "bootloader.bin"),
     ("partitions", "0x8000", "partitions.bin"),
-    ("firmware", "0x10000", "firmware.bin"),
+    # otadata decides which slot boots. A fresh install MUST write it: the bytes
+    # already at 0xF000 on a panel coming off the old factory-only table are the
+    # tail of its phy_init partition, and a stale/garbage otadata is how you get
+    # a board that flashes cleanly and boots the wrong slot.
+    ("otadata", "0xF000", "ota_data_initial.bin"),
+    # 0x20000, NOT the 0x10000 you remember: ota_0 starts at the first 64 KB
+    # boundary above otadata. See partitions.csv.
+    ("firmware", "0x20000", "firmware.bin"),
 ]
 
 
@@ -143,13 +150,16 @@ manifest = {
                         "images": image_names,
                     },
                     {
-                        # NVS survives, so the panel comes back on its own WiFi and
-                        # table. Only the app partition is rewritten.
+                        # NVS is left alone, so the panel comes back on its own WiFi
+                        # and table. otadata ships WITH the app on purpose: this
+                        # writes ota_0, and if otadata still pointed at ota_1 the
+                        # board would boot the older slot and the update would look
+                        # like it silently did nothing.
                         "name": "firmware-update",
                         "description": "Update firmware only, preserving NVS (WiFi "
                                        "credentials, table address, screen settings).",
                         "erase": False,
-                        "images": ["%s-firmware" % MCU],
+                        "images": ["%s-otadata" % MCU, "%s-firmware" % MCU],
                     },
                 ],
             }],

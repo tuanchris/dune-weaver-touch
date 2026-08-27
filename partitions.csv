@@ -1,6 +1,30 @@
 # Name,   Type, SubType, Offset,   Size,     Flags
+# OTA pair (2026-08-27). The panel accepts a PUSHED image at POST /updatefw,
+# the same contract dune-weaver-firmware serves, so it needs otadata plus two
+# app slots. Crossing to this table is a one-time USB/web reflash: OTA cannot
+# rewrite the partition table it is running from.
+#
+# nvs stays at 0x9000 size 0x6000 EXACTLY, so that every FUTURE update leaves
+# settings alone -- an OTA never rewrites the partition table, and NVS contents
+# survive only while the region's offset AND size are unchanged. The textbook
+# IDF layout shrinks nvs to 0x4000 to fit otadata at 0xd000, which would move
+# the goalposts for good. The cost of keeping it: otadata lands at 0xF000 and
+# app partitions must be 64 KB aligned, so ota_0 starts at 0x20000 and the
+# 60 KB between them is unused. With 7.9 MB still free above ota_1, cheap.
+#
+# It does NOT save the one-time migration. Measured on the board 2026-08-27:
+# after flashing this table over the old factory-only one WITHOUT erasing, the
+# nvs region came back holding only the WiFi driver's own nvs.net80211
+# calibration namespace -- "dwt" was gone and the panel asked to be
+# provisioned again. So expect every panel crossing over to re-enter its WiFi
+# credentials once. Do not promise otherwise in release notes.
+#
+# phy_init is gone: CONFIG_ESP_PHY_INIT_DATA_IN_PARTITION is not set, so the
+# PHY blob is compiled into the app and that partition was never read.
+#
+# 4 MB slots for a 1.63 MB app (2.4x headroom). Previews live on the TF card,
+# so there is still no data partition -- see PORTING_NOTES section 6.
 nvs,      data, nvs,     0x9000,   0x6000,
-phy_init, data, phy,     0xf000,   0x1000,
-# No data partition: previews live on the TF card, not in flash (2026-08-26).
-# The ~10 MB above factory is unallocated, kept free for the OTA pair.
-factory,  app,  factory, 0x10000,  0x600000,
+otadata,  data, ota,     0xF000,   0x2000,
+ota_0,    app,  ota_0,   0x20000,  0x400000,
+ota_1,    app,  ota_1,   0x420000, 0x400000,

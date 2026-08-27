@@ -8,6 +8,7 @@ idf_component_register(
         "net/wifi.c"
         "net/discovery.c"
         "net/fw_client.c"
+        "net/ota.c"
         "app/jobs.c"
         "app/sd_catalog.c"
         "app/state.c"
@@ -32,6 +33,11 @@ idf_component_register(
         esp_netif
         esp_event
         esp_http_client
+        esp_http_server
+        esp_https_ota
+        esp-tls
+        app_update
+        esp_app_format
         json
         esp_timer
         fatfs

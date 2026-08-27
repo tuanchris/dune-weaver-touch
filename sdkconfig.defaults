@@ -70,3 +70,10 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_32=y
 CONFIG_LV_FONT_MONTSERRAT_40=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# OTA (2026-08-27). The bootloader marks a freshly flashed image
+# PENDING_VERIFY and reverts to the previous slot on the next reset unless the
+# app calls esp_ota_mark_app_valid_cancel_rollback() -- ota_mark_valid() does
+# that at the end of app_main, so an image that panics during init undoes
+# itself instead of bricking the panel's only UI.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

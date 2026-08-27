@@ -10,6 +10,25 @@ doubt, read the QML source — do not invent behavior.
 ## Commands
 
 - Build: `pio run` · Flash: `pio run -t upload` · Monitor: `pio device monitor`
+- OTA (same contract as dune-weaver-firmware, `src/net/ota.c`): the panel RUNS
+  an HTTP server and takes a PUSHED image — it never pulls, which is what keeps
+  TLS and its internal-RAM cost off the device.
+  `curl http://<panel>/updatefw` probes (`ready`/`busy`);
+  `curl -F "firmware.binS=$(stat -f%z fw.bin)" -F "firmware.bin=@fw.bin" http://<panel>/updatefw`
+  flashes the inactive slot and reboots ~1 s after answering `{"status":"ok"}`.
+  Rollback is armed: `ota_mark_valid()` at the end of `app_main` is what stops
+  the bootloader reverting on the next reset, so anything that panics during
+  init undoes itself. **Crossing onto the OTA partition table needs one USB
+  flash and re-provisioning** — see partitions.csv.
+- The panel ALSO pulls, for Control's Update button: the GitHub API for the
+  latest tag, then `releases/<tag>/firmware.bin` off `main` — the same
+  artifacts the web installer flashes, which is why the release workflow
+  commits them. This is the only HTTPS the panel speaks and a TLS session comes
+  out of internal RAM, so it runs once per connect and on demand, never in a
+  poll loop. Control promotes the FIRMWARE card to the top (and lights a dot on
+  the Control tab) while an update is waiting or installing; `control_reorder()`
+  owns that and the offline WIFI promotion together, so they cannot fight over
+  the top slot.
 - Console is native USB CDC (`/dev/cu.usbmodem*`); UART0 is physically wired to RS485.
 - First build downloads managed components into `managed_components/` (gitignored).
 - Table sim: `python tools/table_sim.py` — mock table on the LAN (mDNS `DWSIM`,
@@ -34,7 +53,12 @@ doubt, read the QML source — do not invent behavior.
   `sim/shim/` fakes ESP-IDF (pthread FreeRTOS, POSIX esp_http_client,
   file-backed NVS, /storage → `sim/simfs/`), `sim/stub/` fakes WiFi/mDNS.
   Tables via `DWT_SIM_TABLES="Name=url,..."` (default DWSIM=127.0.0.1:8080 —
-  run the table sim). Device-specific bugs (internal-RAM exhaustion, stack
+  run the table sim); `DWT_SIM_WIFI=off` starts disconnected, which is the only
+  way to reach the offline layouts here (Control puts WIFI first when the panel
+  has no network) — a join from the Scan list still succeeds, so one run covers
+  both orders. `DWT_SIM_OTA=v0.9.9|none|fail` fakes the update check
+  (`stub/ota_stub.c`), which is the only way to see the nav dot, the FIRMWARE
+  card's promoted position and the download progress without cutting a release. Device-specific bugs (internal-RAM exhaustion, stack
   sizes, flash-cache faults) do NOT reproduce here — the sim is for UI/protocol
   work, hardware still gates release.
 - Preview pipeline check: `DWT_SIM_PREVIEW_SELFTEST=<pattern.thr>

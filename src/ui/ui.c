@@ -31,6 +31,7 @@ static const tab_def_t TABS[TAB_COUNT] = {
 
 static lv_obj_t *s_pages[TAB_COUNT];
 static lv_obj_t *s_tab_btns[TAB_COUNT];
+static lv_obj_t *s_tab_badges[TAB_COUNT];
 static int s_active_tab = 0;
 
 // One connection dot + name label per page header
@@ -103,7 +104,39 @@ static lv_obj_t *make_tab_button(lv_obj_t *nav, int idx)
     lv_label_set_text(label, TABS[idx].label);
     lv_obj_set_style_text_font(label, TH_FONT_EYEBROW, 0);
 
+    // Update badge, hidden until something sets it. IGNORE_LAYOUT so the flex
+    // column does not reserve a row for it (that would shove icon+label out of
+    // TH_NAV_HEIGHT), and CLICKABLE cleared because it sits on top of the tab's
+    // own touch target -- a bare lv_obj is clickable by default, has no
+    // handler, and LVGL does not bubble, so it would silently eat taps on that
+    // corner of the tab.
+    lv_obj_t *badge = plain(btn);
+    lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(badge, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_size(badge, 10, 10);
+    lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(badge, th.danger, 0);
+    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_align(badge, LV_ALIGN_TOP_MID, 20, 8);
+    lv_obj_add_flag(badge, LV_OBJ_FLAG_HIDDEN);
+    s_tab_badges[idx] = badge;
+
     return btn;
+}
+
+void ui_set_tab_badge(int tab, bool on)
+{
+    if (tab < 0 || tab >= TAB_COUNT || s_tab_badges[tab] == NULL) {
+        return;
+    }
+    if (on == !lv_obj_has_flag(s_tab_badges[tab], LV_OBJ_FLAG_HIDDEN)) {
+        return;  // no change: never invalidate for nothing on a full_refresh panel
+    }
+    if (on) {
+        lv_obj_remove_flag(s_tab_badges[tab], LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_tab_badges[tab], LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void ui_init(void)

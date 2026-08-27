@@ -18,6 +18,7 @@
 #include "../../app/state.h"
 #include "../../net/discovery.h"
 #include "../../net/fw_client.h"
+#include "../../net/ota.h"
 #include "../../net/settings.h"
 #include "../../net/wifi.h"
 #include "../theme.h"
@@ -35,6 +36,11 @@ static const char *TAG = "page_control";
 #define MAX_TABLES 8
 
 // ---- WiFi card ----
+// Both cards are held because their position is not fixed: control_reorder()
+// promotes WIFI to the top when the panel is offline and FIRMWARE when an
+// update is waiting.
+static lv_obj_t *s_wifi_card;
+static lv_obj_t *s_fw_card;
 static lv_obj_t *s_wifi_row;
 static lv_obj_t *s_wifi_title;
 static lv_obj_t *s_wifi_sub;
@@ -44,6 +50,7 @@ static lv_obj_t *s_scan_label;
 static char s_ap_ssid[MAX_APS][33];
 static int s_ap_count;
 static bool s_scanning;
+static bool s_ota_checked;  // one update check per connect, see on_wifi_event
 static bool s_joining;
 static char s_join_ssid[33];
 
@@ -361,9 +368,85 @@ static void wifi_row_refresh(void)  // LVGL task context only
 }
 
 // WiFi connectivity edge, fired from the WiFi event task.
+// Two cards are promoted to the top when they need attention, and one function
+// owns the whole order so they cannot fight over index 0 (Tuan's direction,
+// 2026-08-27):
+//
+//   offline           -> WIFI first. TABLE, TABLE CONNECTION and TABLES all
+//                        need a network, so its usual place puts three dead
+//                        cards and a stepper press in front of the only
+//                        control that gets the panel working.
+//   update waiting    -> FIRMWARE first, matching the nav dot that sent you
+//                        here. Control is six cards deep; at rest FIRMWARE
+//                        sits near the bottom and you would have to hunt.
+//   both              -> WIFI, then FIRMWARE: you cannot download an update
+//                        without a network, so WiFi outranks it.
+//
+// At rest both drop to the bottom -- WiFi is provisioned once and firmware is
+// checked rarely, so neither earns a place above what the table does.
+//
+// LVGL ctx; caller holds the port lock.
+// RSSI -> one of the five signal glyphs. Thresholds are the conventional WiFi
+// buckets: -50 excellent, -60 good, -70 fair, -80 weak, below that barely
+// there. A number in dBm is precise and means nothing to anyone picking a
+// network off a list (Tuan, 2026-08-27).
+static const char *wifi_bars_icon(int8_t rssi)
+{
+    if (rssi >= -50) {
+        return TH_ICON_WIFI_4;
+    }
+    if (rssi >= -60) {
+        return TH_ICON_WIFI_3;
+    }
+    if (rssi >= -70) {
+        return TH_ICON_WIFI_2;
+    }
+    if (rssi >= -80) {
+        return TH_ICON_WIFI_1;
+    }
+    return TH_ICON_WIFI_0;
+}
+
+static void control_reorder(void)
+{
+    if (s_wifi_card == NULL || s_fw_card == NULL) {
+        return;  // page not built yet
+    }
+    lv_obj_t *parent = lv_obj_get_parent(s_wifi_card);
+    if (parent == NULL) {
+        return;
+    }
+    bool offline = !wifi_is_connected();
+    // Not just OTA_AVAILABLE: promoting only while the update is *offered*
+    // means the card slides back to the bottom the instant you tap Update, so
+    // the progress you asked for scrolls out of sight. It stays up through the
+    // download and the reboot notice.
+    ota_state_t st = ota_state();
+    bool update = (st == OTA_AVAILABLE || st == OTA_DOWNLOADING || st == OTA_INSTALLED);
+    int32_t last = (int32_t)lv_obj_get_child_count(parent) - 1;
+
+    // Reordering invalidates, and full_refresh turns any invalidation into a
+    // whole 1024x600 redraw, so every move below is guarded on a real change.
+    // Park first, then promote in REVERSE priority: each move_to_index(0)
+    // displaces the previous one, so the last promoted ends up on top.
+    if (!update && lv_obj_get_index(s_fw_card) != last) {
+        lv_obj_move_to_index(s_fw_card, last);
+    }
+    if (!offline && lv_obj_get_index(s_wifi_card) != last) {
+        lv_obj_move_to_index(s_wifi_card, last);
+    }
+    if (update && lv_obj_get_index(s_fw_card) != 0) {
+        lv_obj_move_to_index(s_fw_card, 0);
+    }
+    if (offline && lv_obj_get_index(s_wifi_card) != 0) {
+        lv_obj_move_to_index(s_wifi_card, 0);
+    }
+}
+
 static void on_wifi_event(bool connected)
 {
     lvgl_port_lock(0);
+    control_reorder();
     if (connected) {
         s_joining = false;
         // Scan once as soon as there is a network to scan. Discovery used to
@@ -371,6 +454,12 @@ static void on_wifi_event(bool connected)
         // until you thought to press it — it looked like discovery was broken.
         if (!s_auto_scanned) {
             s_auto_scanned = start_discovery();
+        }
+        // One update check per connect, never a poll loop: it is the only
+        // HTTPS this panel speaks and a TLS session comes out of internal RAM.
+        if (!s_ota_checked) {
+            s_ota_checked = true;
+            ota_check_async();
         }
     }
     wifi_row_refresh();
@@ -545,8 +634,8 @@ static void rebuild_ap_list(const wifi_ap_record_t *aps, int n)
         lv_obj_set_style_text_color(name, th.text, 0);
 
         lv_obj_t *rssi = lv_label_create(ap_row);
-        lv_label_set_text_fmt(rssi, "%d dBm", (int)aps[i].rssi);
-        lv_obj_set_style_text_font(rssi, TH_FONT_CAPTION, 0);
+        lv_label_set_text(rssi, wifi_bars_icon(aps[i].rssi));
+        lv_obj_set_style_text_font(rssi, TH_FONT_TITLE, 0);
         lv_obj_set_style_text_color(rssi, th.text2, 0);
     }
     if (s_ap_count > 0) {
@@ -593,6 +682,7 @@ static void scan_clicked(lv_event_t *e)
 static void build_wifi_card(lv_obj_t *column)
 {
     lv_obj_t *card = make_card(column);
+    s_wifi_card = card;
     make_section_label(card, "WIFI");
 
     lv_obj_t *row = make_hrow(card);
@@ -1356,6 +1446,116 @@ static void on_state_changed(void)  // runs in the LVGL task (state.c locks)
 // Page
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Card: FIRMWARE — running version, and the Update button
+// ---------------------------------------------------------------------------
+
+static lv_obj_t *s_fw_title;
+static lv_obj_t *s_fw_sub;
+static lv_obj_t *s_fw_btn;
+static lv_obj_t *s_fw_btn_label;
+
+static void fw_btn_clicked(lv_event_t *e)
+{
+    (void)e;
+    // One button, two jobs: it offers the update once a check has found one,
+    // and re-checks otherwise. Both are async — never block the LVGL task.
+    if (ota_state() == OTA_AVAILABLE) {
+        ota_update_async();
+    } else {
+        ota_check_async();
+    }
+}
+
+// LVGL ctx. Caller holds the port lock.
+static void fw_refresh(void)
+{
+    if (s_fw_title == NULL) {
+        return;
+    }
+    ota_state_t st = ota_state();
+    const char *btn = "Check for updates";
+    char sub[128];
+
+    switch (st) {
+        case OTA_CHECKING:
+            snprintf(sub, sizeof(sub), "Checking for updates...");
+            break;
+        case OTA_AVAILABLE:
+            snprintf(sub, sizeof(sub), "%s is available", ota_latest_version());
+            btn = "Update now";
+            break;
+        case OTA_UP_TO_DATE:
+            snprintf(sub, sizeof(sub), "Up to date");
+            break;
+        case OTA_DOWNLOADING: {
+            int pct = ota_progress_pct();
+            snprintf(sub, sizeof(sub), "Downloading %s... %d%%", ota_latest_version(),
+                     pct < 0 ? 0 : pct);
+            btn = "Updating...";
+            break;
+        }
+        case OTA_INSTALLED:
+            snprintf(sub, sizeof(sub), "Installed %s - restarting", ota_latest_version());
+            btn = "Restarting...";
+            break;
+        case OTA_ERROR:
+            snprintf(sub, sizeof(sub), "%s", ota_error());
+            break;
+        default:
+            snprintf(sub, sizeof(sub), "Tap to check for a newer version");
+            break;
+    }
+
+    lv_label_set_text_fmt(s_fw_title, "Version %s", ota_version());
+    lv_label_set_text(s_fw_sub, sub);
+    // make_info_rect() creates the sub label hidden -- it is optional there, so
+    // a caller that only sets text gets a silently invisible second line.
+    lv_obj_remove_flag(s_fw_sub, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_fw_btn_label, btn);
+
+    // The button is dead while a job owns the radio, and while the reboot timer
+    // is counting down.
+    bool busy = (st == OTA_CHECKING || st == OTA_DOWNLOADING || st == OTA_INSTALLED);
+    if (busy) {
+        lv_obj_add_state(s_fw_btn, LV_STATE_DISABLED);
+    } else {
+        lv_obj_remove_state(s_fw_btn, LV_STATE_DISABLED);
+    }
+
+    // The nav badge is the whole point of checking in the background: Control
+    // is four cards deep, so without it an available update is invisible until
+    // you go looking.
+    ui_set_tab_badge(UI_TAB_CONTROL, st == OTA_AVAILABLE);
+}
+
+// Fired from the jobs task, so it must take the lock itself.
+static void on_ota_state(void)
+{
+    // One lock for both: the card repaint and a possible promotion coalesce
+    // into a single refresh instead of two full-screen redraws.
+    lvgl_port_lock(0);
+    fw_refresh();
+    control_reorder();
+    lvgl_port_unlock();
+}
+
+static void build_firmware_card(lv_obj_t *column)
+{
+    lv_obj_t *card = make_card(column);
+    s_fw_card = card;
+    make_section_label(card, "FIRMWARE");
+
+    lv_obj_t *row = make_hrow(card);
+    make_info_rect(row, &s_fw_title, &s_fw_sub);
+
+    s_fw_btn = make_small_button(row, "Check for updates", th.accent, false);
+    s_fw_btn_label = lv_obj_get_child(s_fw_btn, 0);
+    lv_obj_add_event_cb(s_fw_btn, fw_btn_clicked, LV_EVENT_CLICKED, NULL);
+
+    fw_refresh();
+}
+
 lv_obj_t *page_control_create(lv_obj_t *parent)
 {
     lv_obj_t *page = ui_page_root(parent);
@@ -1387,11 +1587,21 @@ lv_obj_t *page_control_create(lv_obj_t *parent)
     // The QML reference is Connection, Tables, Table, Screen and has no WiFi
     // card at all (it runs on a Pi with system networking), so this is a
     // deliberate divergence, like the one-card-per-row layout above.
+    //
+    // WIFI is the exception to that order: offline it jumps to the top, since
+    // nothing above it works without a network. wifi_card_reposition() owns it.
     build_table_card(body);
     build_conn_card(body);
     build_tables_card(body);
     build_wifi_card(body);
     build_screen_card(body);
+    build_firmware_card(body);
+
+    // Set the opening order before the first frame. wifi_init() runs after
+    // ui_init(), so a panel with no credentials would otherwise show the
+    // connected layout until the first event, and a freshly provisioned one
+    // never gets a disconnected event at all.
+    control_reorder();
 
     ui_page_stepper(row, body);
 
@@ -1399,6 +1609,7 @@ lv_obj_t *page_control_create(lv_obj_t *parent)
     // only record callbacks; the first events arrive once those tasks start.
     state_add_listener(on_state_changed);
     wifi_set_event_cb(on_wifi_event);
+    ota_set_state_cb(on_ota_state);
 
     return page;
 }
