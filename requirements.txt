@@ -1,0 +1,6 @@
+# Build toolchain for CI releases (.github/workflows/release.yml).
+# Pinned to the 6.1 line, the same series the firmware repo builds with and
+# what this project is developed against locally (6.1.18). The ESP-IDF
+# toolchain itself is pinned separately by platformio.ini's
+# `platform = espressif32@6.12.0`.
+platformio == 6.1.*
