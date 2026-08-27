@@ -112,7 +112,9 @@ Normalize: `/patterns/…` pass; `/sd/…` strip `/sd`; else prepend `/patterns/
 
 ## 3. Persistence (NVS here; `touch_settings.json` in the Pi app)
 Keys: table_url, table_password (b64), screen_timeout (s, 0=never, default
-300), pause_between_patterns (default 10800), playlist_shuffle (default true),
+300 in the Pi app — **this panel defaults to 60**, the "1 m" chip, since it is
+an always-on wall panel rather than a windowed kiosk app; Tuan, 2026-08-27),
+pause_between_patterns (default 10800), playlist_shuffle (default true),
 playlist_run_mode (default "loop"), playlist_clear_pattern (default
 "adaptive"), dark_mode. Board NVS wins for playlist settings on connect
 (re-read `Playlist/*` from `/sand_settings`).

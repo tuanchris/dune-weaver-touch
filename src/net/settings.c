@@ -36,7 +36,7 @@ static app_settings_t s_settings;
 static void set_defaults(app_settings_t *s)
 {
     memset(s, 0, sizeof(*s));
-    s->screen_timeout_s = 300;
+    s->screen_timeout_s = 60;  // "1 m" chip (Tuan, 2026-08-27); was 5 m
     s->pause_between_s = 10800;
     s->playlist_shuffle = true;
     strlcpy(s->playlist_run_mode, "loop", sizeof(s->playlist_run_mode));

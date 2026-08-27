@@ -70,6 +70,14 @@ LV_FONT_DECLARE(outfit_sb_36)
 #define TH_ICON_STOP "\xEE\x81\x87"           // U+E047
 #define TH_ICON_TUNE "\xEE\x90\xA9"           // U+E429
 #define TH_ICON_WIFI "\xEE\x98\xBE"           // U+E63E
+// WiFi signal ladder, weakest to strongest. One wedge that fills progressively
+// (the network_wifi* family) so the five read as a single scale — see
+// tools/gen_fonts.sh for why the wifi_1_bar/wifi_2_bar names are NOT these.
+#define TH_ICON_WIFI_0 "\xEF\x82\xB0"         // U+F0B0 signal_wifi_0_bar
+#define TH_ICON_WIFI_1 "\xEE\xAF\xA4"         // U+EBE4 network_wifi_1_bar
+#define TH_ICON_WIFI_2 "\xEE\xAF\x96"         // U+EBD6 network_wifi_2_bar
+#define TH_ICON_WIFI_3 "\xEE\xAF\xA1"         // U+EBE1 network_wifi_3_bar
+#define TH_ICON_WIFI_4 "\xEE\x86\xBA"         // U+E1BA network_wifi
 
 typedef struct {
     lv_color_t bg;

@@ -11,7 +11,7 @@ typedef struct {
     char wifi_pass[65];
     char table_url[128];       // normalized base URL ("http://192.168.1.10"), "" if unset
     char table_password[65];   // plaintext X-Sand-Key, "" if unset
-    uint32_t screen_timeout_s; // 0 = never; default 300
+    uint32_t screen_timeout_s; // 0 = never; default 60 (the "1 m" chip)
     uint32_t pause_between_s;  // default 10800 (3 h)
     bool playlist_shuffle;     // default true
     char playlist_run_mode[8]; // "loop" | "single"; default "loop"
