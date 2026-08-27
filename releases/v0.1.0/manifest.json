@@ -1,0 +1,74 @@
+{
+  "name": "Dune Weaver Touch",
+  "version": "v0.1.0",
+  "source_url": "https://github.com/tuanchris/dune-weaver-touch/tree/v0.1.0",
+  "release_url": "https://github.com/tuanchris/dune-weaver-touch/releases/tag/v0.1.0",
+  "images": {
+    "esp32s3-bootloader": {
+      "size": 22368,
+      "offset": "0x0",
+      "path": "bootloader.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "983161694a9ee735cc20ce14378bd668e4deec69a68bfba473feb9745a634ddf"
+      }
+    },
+    "esp32s3-partitions": {
+      "size": 3072,
+      "offset": "0x8000",
+      "path": "partitions.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "fabcbebf733457e9706b46544b2a1cb9672a8e1ce626f5dc7d7e6fb4738d5b0e"
+      }
+    },
+    "esp32s3-firmware": {
+      "size": 1628176,
+      "offset": "0x10000",
+      "path": "firmware.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "2d0a1d6e406c8d9aec1cc0d5f0e5822ead31d8f695e938d39dcfb5bcc523c1d8"
+      }
+    }
+  },
+  "installable": {
+    "name": "installable",
+    "description": "Things you can install",
+    "choice-name": "Board",
+    "choices": [
+      {
+        "name": "esp32s3",
+        "description": "Waveshare ESP32-S3-Touch-LCD-5B (16MB flash, 8MB PSRAM)",
+        "choice-name": "Installation type",
+        "choices": [
+          {
+            "name": "touch-panel",
+            "description": "Dune Weaver Touch panel (WiFi + mDNS table discovery)",
+            "choice-name": "Installation type",
+            "choices": [
+              {
+                "name": "fresh-install",
+                "description": "Complete install, erasing all previous data including saved WiFi credentials.",
+                "erase": true,
+                "images": [
+                  "esp32s3-bootloader",
+                  "esp32s3-partitions",
+                  "esp32s3-firmware"
+                ]
+              },
+              {
+                "name": "firmware-update",
+                "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
+                "erase": false,
+                "images": [
+                  "esp32s3-firmware"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

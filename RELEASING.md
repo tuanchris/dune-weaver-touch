@@ -95,14 +95,29 @@ and confirm a clean boot: table discovery, no errors or warnings, and a flat
 `app: heap:` heartbeat (internal free should not drift across several minutes).
 Walk the pages you touched on the panel itself.
 
+## The installer reads `releases/<tag>/` off `main`
+
+The Dune Weaver installer has a Touch panel section (duneweaver.com/install →
+*Dune Weaver Touch Panel*), and it flashes from
+`raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/<tag>/`,
+**not** from the GitHub Release assets. That is not a preference: a release
+asset download redirects to `release-assets.githubusercontent.com`, which sends
+no `Access-Control-Allow-Origin`, so the browser refuses the fetch. So the
+workflow's last build step commits `manifest.json` and the three `.bin` images
+into the tracked `releases/<tag>/` on the default branch.
+
+- **A release that skips that step is invisible to the installer** — the
+  version shows up in the picker (that list comes from the API, which *is*
+  CORS-enabled) and then the manifest 404s. If someone reports that, check the
+  branch, not the release.
+- The convenience zip stays an asset only; nothing reads it from the branch,
+  and it would double what this repo grows by per release (~1.65 MB as it is).
+- `release/` (singular, staging) is gitignored; `releases/` (plural, tracked)
+  is not. Don't collapse them.
+
 ## What is deliberately not here
 
-The firmware repo's release workflow has two more steps that do not apply:
+One step from the firmware repo's workflow does not apply:
 
 - **The unprefixed `firmware.bin` alias** — for the mobile app's table-OTA
   picker, which has nothing to do with the panel.
-- **Committing artifacts to the default branch** — `dune-weaver-installer`
-  fetches `releases/<tag>/` from the *firmware* repo via
-  `raw.githubusercontent.com` and has no knowledge of the touch panel. Porting
-  it would add ~1.7 MB per release to this repo forever with nothing reading
-  it. If the installer ever learns about the panel, port that step then.

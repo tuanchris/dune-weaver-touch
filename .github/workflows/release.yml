@@ -9,13 +9,18 @@ name: Release
 #
 # or trigger manually against an existing tag from the Actions tab.
 #
-# Ported from dune-weaver-firmware's release.yml, minus two steps that repo
-# needs and this one does not: the unprefixed `firmware.bin` alias (for the
-# mobile app's table-OTA picker) and committing artifacts to the default branch
-# (dune-weaver-installer reads releases/<tag>/ from the FIRMWARE repo and has no
-# knowledge of the touch panel). Adding the latter would grow this repo by
-# ~1.7 MB per release forever with nothing reading it -- if the installer ever
-# learns about the panel, port that step then.
+# Ported from dune-weaver-firmware's release.yml, minus the one step that repo
+# needs and this one does not: the unprefixed `firmware.bin` alias, which
+# exists for the mobile app's table-OTA picker and has nothing to do with the
+# panel.
+#
+# It DOES commit artifacts to the default branch, because the Dune Weaver
+# installer now has a Touch panel section and reads releases/<tag>/ from this
+# repo over raw.githubusercontent.com. That is not a preference: GitHub's
+# release-asset downloads redirect to release-assets.githubusercontent.com,
+# which sends no Access-Control-Allow-Origin, so a browser cannot fetch them.
+# The cost is ~1.65 MB per release tracked forever (the .bin images and the
+# manifest -- the convenience zip stays an asset only).
 
 on:
   push:
@@ -123,6 +128,41 @@ jobs:
             gh release create "$TAG" --title "$TAG" $PRERELEASE \
               --generate-notes \
               "release/$TAG"/*
+          fi
+
+      - name: Track artifacts on the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The installer downloads the panel firmware from releases/<tag>/ on
+          # the default branch (raw.githubusercontent.com/.../<branch>/...), NOT
+          # from the GitHub Release assets: those redirect to a host that sends
+          # no CORS header, so the browser's fetch is blocked before it starts.
+          # Skip this and the installer's Touch section 404s on the manifest.
+          #
+          # release/<tag>/ is gitignored + untracked, so it survives the branch
+          # checkout; we copy it into the tracked releases/<tag>/. The zip is
+          # deliberately left behind -- nothing reads it from here, and it would
+          # double what this repo grows by per release.
+          #
+          # NOTE: this step checks out the default BRANCH, where `git describe`
+          # would answer with the branch's last tag rather than the one being
+          # released -- another reason the tag is resolved once, up front.
+          TAG="$DW_RELEASE_TAG"
+          BRANCH="${{ github.event.repository.default_branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          mkdir -p "releases/$TAG"
+          cp -f "release/$TAG"/*.bin "release/$TAG/manifest.json" "releases/$TAG"/
+          git add "releases/$TAG"
+          if git diff --cached --quiet; then
+            echo "artifacts already tracked; nothing to commit"
+          else
+            git commit -m "Track $TAG release artifacts"
+            # one retry in case the branch advanced between fetch and push
+            git push origin "HEAD:$BRANCH" || { git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH"; }
           fi
 
       - name: Report what was published
