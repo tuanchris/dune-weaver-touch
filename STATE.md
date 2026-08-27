@@ -1,5 +1,202 @@
 # STATE — 2026-08-26
 
+## Control page reordered: TABLE first (2026-08-26, Tuan's direction)
+
+Tuan: "rearrange control page to make more sense. table should be first."
+
+New order in `page_control_create`, which is the whole change — the five
+`build_*_card` calls are independent (each writes only its own statics, all
+disjoint; verified before reordering) so this is pure sequence:
+
+    the table  ->  TABLE, TABLE CONNECTION, TABLES ON YOUR NETWORK
+    this panel ->  WIFI, THIS SCREEN
+
+Ordered by how often you reach for it rather than by setup sequence. What the
+table DOES leads, the two "which table am I talking to" cards follow, and the
+panel's own settings go last — WiFi is provisioned once and the screen options
+are set once. A happy side effect: the whole TABLE card (Home/Center/Edge, Auto
+play, Restart table) now fits on the first screen with no stepping at all.
+
+The QML reference is Connection, Tables, Table, Screen and has **no WiFi card**
+(it runs on a Pi with system networking), so this is a deliberate divergence
+like the one-card-per-row layout. The rationale is in a comment at the call
+site so nobody "restores" the reference order.
+
+Verified in the sim: order correct, stepper still walks card-to-card to the
+bottom with no dead-stop, and every state-driven value still populates after
+the reorder (WiFi Connected, table name, sleep chips, Night mode). Flashed;
+board boots clean, zero errors/warnings, heap flat at 129,331 B.
+
+### Harness lesson: check who owns the focus before every synthetic click
+
+A run "failed" with every tap doing nothing, and the cause was **Discord had
+stolen the frontmost slot** — so the clicks were landing in Discord's window on
+that display, not the sim. `tap()` now refuses to click unless `dwt_sim` is
+frontmost, re-focusing up to three times and raising rather than clicking blind.
+
+Related trap in the same run: a "tap and assert the screen changed" retry loop
+is WRONG for command buttons. Home/Center/Edge are `$`-commands with no visual
+result, so "no change" is the expected outcome and the loop happily re-sent it
+— and this project's rule is **never retry a `$`-command**. Nothing actually
+reached the table (the page had kept its scroll position, so the taps landed on
+THIS SCREEN), but only by luck. Use expect_change only for navigation.
+
+## Playlist load: where the time goes, and the + button (2026-08-26, Tuan)
+
+Tuan: "how are we loading playlist it takes a really long time".
+
+**The mechanism.** `list_load_job` (page_playlists.c) does, per load:
+`GET /sand_playlists` for the names, then **one `GET /sd/playlists/<name>.txt`
+per playlist, sequentially**, purely to fill each row's "<n> patterns"
+sub-label. Capped at 12; the first failure aborts the pass. Confirmed against
+the table sim's request log — a load is exactly `1 + N` requests:
+
+    1.179  GET /sand_playlists
+    1.184  GET /sd/playlists/Quick%20Demo.txt
+    1.192  GET /sd/playlists/Sim%20Favorites.txt
+
+Two things worth knowing about *when* it runs: it is triggered by the connect
+edge (`on_state_changed`), **not** by opening the tab — tapping Playlists
+issues zero requests — and it re-runs in full after every create/delete/edit.
+The log above shows it firing twice in one boot (initial connect, then the
+settings refresh at +8.9 s).
+
+**Why it drags on real hardware, and what was fixed.** Each count was written
+to its label under its OWN `lvgl_port_lock`. This panel runs `full_refresh`,
+so any invalidation re-renders all 1024x600 — ~200 ms measured during the
+Browse page-fill pass — and the writes cannot overlap the fetches, because
+`lvgl_port_lock` is the same mutex `lvgl_port_task` holds around
+`lv_timer_handler`. So 12 playlists cost 12 full-screen redraws (~2.4 s)
+strictly interleaved with 13 sequential HTTP round trips.
+
+Fixed the redraw half exactly like Browse: **collect all counts, write them in
+one batch under a single lock.** The per-iteration generation check stays —
+taking the lock to *read* is cheap, it is invalidation that costs. Verified in
+the sim: counts still populate (3 / 6). Rows show their NAMES immediately from
+`list_rebuild` either way; only the sub-line is deferred.
+
+**The wire half is NOT fixed and needs the board, not the panel.** `1 + N`
+round trips exists only because the board has no playlist-manifest route
+(deferred backlog item 5) — nothing on the panel can turn N fetches into one.
+Numbers above are localhost; the real per-request cost on a board serving /sd
+over WiFi has NOT been measured. Do that with a `-DPV_DEBUG_TIMING`-style INFO
+flag before optimising further — `ESP_LOGD` is compiled out on device.
+
+**The + button was oversized.** `ICON_BTN_SIZE` is 66 (QML 44 x 1.5), but that
+scale predates the 72 -> 60 header shrink, so the filled accent circle
+overflowed the 60 px bar and dominated it. Added `HEADER_BTN_SIZE` 48 —
+matching every other page's header control (page_browse's back/refresh/search)
+— and used it for the list's + and the detail header's back/delete circles.
+The row badge keeps 66; it sits in a 114 px row and reads correctly there.
+
+**Playlist editing vs the reference — one real gap.** We have: create (+),
+delete (trash), remove a pattern (the x per row, `DET_ROW_DISPLAY_MAX` is 150
+so that is not a practical cap), and add-from-Browse ("Add to playlist").
+`ModernPlaylistPage.qml:381-410` also puts an **add-pattern + beside the
+"Patterns" heading** that pushes a full-page `PatternSelectorPage` with
+`existingPatterns` — we never ported it, so a playlist can only be added to
+from the Browse side. That is the "we used to be able to do that" gap.
+Reorder and rename are NOT in the reference either, so they are not gaps.
+
+### Add-pattern picker BUILT (Tuan's call: reuse the modal, not a new page)
+
+A `+` now sits beside the "PATTERNS" heading (outlined accent circle, like the
+QML one) and opens an "Add pattern" modal instead of pushing a page: title +
+match count, a search pill, the matching patterns as rows, a stepper, Cancel.
+Picking a row appends and re-uploads, then the detail reloads.
+
+Two things load-bearing enough to keep:
+
+- **The catalogue is BORROWED from Browse**, via the new
+  `page_browse_pattern_list()` in pages.h. A second 1200-entry copy is exactly
+  the internal-RAM exhaustion this project already shipped once. It is LVGL-ctx
+  only: `load_job` swaps `s_list` under the lock, so the picker copies what it
+  needs and re-bounds-checks the index on tap.
+- **Rows are capped at `PICK_ROW_MAX` (40)**, and the label says "first 40 of
+  1232 - keep typing". A widget per pattern is the same bomb. The search is the
+  narrowing mechanism, and it applies on Enter / close / focus loss only —
+  never per keystroke, since each rebuild is a full-screen redraw.
+
+`build_content_without(skip)` became `build_content(skip, add_rel)` so add and
+remove share one whole-file rewrite path (the board has no partial-edit route).
+
+Verified in the sim by driving real taps: + opens; search "star" -> "first 40
+of 53"; picking `rotating_stars` off the FILTERED list appended exactly
+`/patterns/custom_patterns/rotating_stars.thr` (index mapping through the
+filter is right, and the sub-path is preserved); header count went 6 -> 7 -> 8;
+Cancel closes; the per-row x still removes and renumbers. **Sim only, NOT
+flashed.**
+
+Harness note for the next session: `sim/shot.py` + cliclick needs care. The
+window server swallows the first synthetic click after the app activates, and
+the sim window moves on every restart — so re-read the window bounds per tap,
+spend one inert click first, and **verify each tap changed the screen** before
+trusting the next one. An unnoticed Browse detail overlay (which hides the nav
+bar) made a whole run land on inert chrome and read as "the taps are broken".
+
+## Full-app check: Playlists list was completely un-openable (2026-08-26)
+
+Tuan: "check if everything on the touch app is working." Walked every page in
+the UI sim with real synthetic taps (cliclick + `sim/shot.py`) against the
+table sim. Everything below passed — and one page was flat broken.
+
+**The Playlists list could not be opened at all.** Tapping any playlist row did
+nothing: no navigation, no press feedback, no LVGL event anywhere. Same trap
+already documented in CLAUDE.md and hit once before in the table-switcher
+popup, in two more places that were never swept:
+
+- `page_playlists.c` `list_row_create()` — the row is the touch target, but its
+  two children (`badge`, the note circle, and `col`, the name+count column with
+  `flex_grow(1)`) are bare `lv_obj`s. `plain()` clears SCROLLABLE, not
+  CLICKABLE, so both stayed clickable, had no handler, and LVGL does not
+  bubble. Between them they cover the entire row, so *every* tap was eaten.
+  The only live pixels were the row's top/bottom margins outside `col`'s
+  content height — which is exactly the "middle is dead, margins work"
+  symptom the rule warns about, and why this read as "the page is dead"
+  rather than as a hit-test stopping one level too early.
+- `ui.c` header pill — the 14x14 connection `dot` had the same problem. A
+  small dead spot on the otherwise-live table-switcher pill.
+
+Both fixed by clearing `LV_OBJ_FLAG_CLICKABLE` on the decorative children.
+Verified by probing 12 points across a row: all 12 dead before, all 12 live
+after (badge, name column, and the far-right empty space all navigate), and
+tapping the dot now opens the switcher.
+
+**Swept the rest of the tree for the same bug — it is now clean.** Every
+`lv_obj_add_flag(..., LV_OBJ_FLAG_CLICKABLE)` in `ui.c` and all five pages was
+checked against its children. All other clickable containers hold only
+`lv_label`/`lv_image` children, which LVGL's own constructors mark
+non-clickable (`lv_label.c:762`, `lv_image.c`), or already clear the flag
+(`page_browse.c:298,1346`, `ui.c:251`). `lv_obj.c:584` is the reason the
+default bites: `obj->flags = LV_OBJ_FLAG_CLICKABLE`.
+
+### What else was exercised, all working
+
+Header switcher (opens, lists, marks current, outside-tap dismiss does not leak
+to the card underneath) · all five tabs render · Browse pager 1-8 -> 9-16 ->
+17-24 -> 9-16 with tiles loading · search "star" -> 53 matches, keyboard themed,
+no scrollbar artifact · pattern detail overlay (300 px path) · weave -> auto-nav
+to Now Playing · **progress ring is one continuous arc, the four-segment bug is
+gone** · Pause -> `Hold:0`, Resume -> `Run`, speed chip -> `feed 500`, Stop ->
+`Idle` · playlist run -> "Sim Favorites • 1 of 6 • clearing", Skip -> "2 of 6"
+· Control stepper snaps card-to-card and reaches the bottom with no dead-stop ·
+LED effect chip -> table reports `effect: breathe` · LED state reads *back*
+correctly on load (rainbow, 200/255 = 78%). Boot order is right: `jobs: workers
+up` -> 1232 patterns off the card -> `state: connected`, and the old
+`submit_to(67): jobs_init not called` error is gone. Sim log across the whole
+walk: 9 info lines, zero warnings, zero errors.
+
+Note for whoever screenshots the sim next: the preview tile's corners read as
+(16,16,16) against a (23,19,16) page. That is the documented `lv_snapshot_take`
+ARGB8888 artifact, not a seam — both truncate to RGB565 (2,4,2), so they are
+bit-identical on the panel. Verified again this session; stop re-investigating it.
+
+**Hardware:** the board was up the whole session on the PREVIOUS build and is
+healthy — internal heap 129,411 B *bit-identical* across 17 minutes, largest
+block 63,488, PSRAM flat ~2.2 MB, no errors. One `screen_sleep: woken by touch
+(gesture swallowed)` line, so backlog item 2 has now fired on real hardware.
+**The two fixes above are sim-verified only — NOT yet flashed.**
+
 ## Progress ring rendered as four segments (2026-08-26, photographed by Tuan)
 
 On the board the Now Playing ring showed as four disconnected arcs at 12/3/6/9

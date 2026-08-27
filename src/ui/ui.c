@@ -415,6 +415,10 @@ lv_obj_t *ui_page_header(lv_obj_t *page, const char *title)
     lv_obj_add_event_cb(sw, table_switch_clicked, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *dot = plain(sw);
+    // Decorative, and it sits on the pill's touch target: same trap as the
+    // popup rows below -- a bare lv_obj is CLICKABLE by default, so leaving
+    // the flag set makes the dot itself a dead spot on an otherwise live pill.
+    lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(dot, 14, 14);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(dot, th.danger, 0);

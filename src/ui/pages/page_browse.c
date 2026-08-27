@@ -792,6 +792,13 @@ static void preview_page_tick(lv_timer_t *t)
 
 // ------------------------------------------------------------ pattern load
 
+// Lent to the playlist picker so it does not hold a second copy of a
+// 1200-entry catalogue. LVGL ctx only — load_job swaps s_list under the lock.
+const fw_str_list_t *page_browse_pattern_list(void)
+{
+    return &s_list;
+}
+
 static void load_job(void *arg)
 {
     (void)arg;

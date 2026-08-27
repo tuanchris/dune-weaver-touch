@@ -1377,10 +1377,20 @@ lv_obj_t *page_control_create(lv_obj_t *parent)
     lv_obj_set_style_pad_ver(body, TH_SPACE_MD, 0);
     lv_obj_set_style_pad_row(body, TH_SPACE_LG, 0);
 
-    build_wifi_card(body);
+    // Ordered by how often you actually reach for it, not by setup sequence
+    // (Tuan's direction, 2026-08-26 - "table should be first"). What the table
+    // DOES leads; the two cards about which table you are talking to follow;
+    // the panel's own settings sit at the bottom, since WiFi is provisioned
+    // once and the screen options are set once.
+    //   the table  -> TABLE, TABLE CONNECTION, TABLES ON YOUR NETWORK
+    //   this panel -> WIFI, THIS SCREEN
+    // The QML reference is Connection, Tables, Table, Screen and has no WiFi
+    // card at all (it runs on a Pi with system networking), so this is a
+    // deliberate divergence, like the one-card-per-row layout above.
+    build_table_card(body);
     build_conn_card(body);
     build_tables_card(body);
-    build_table_card(body);
+    build_wifi_card(body);
     build_screen_card(body);
 
     ui_page_stepper(row, body);

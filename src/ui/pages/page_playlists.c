@@ -32,6 +32,17 @@ static const char *TAG = "page_playlists";
 #define MAX_PL_NAME 64          // playlist name (no .txt), matches fw name fields
 #define DET_ROW_DISPLAY_MAX 150 // rows rendered in detail (array itself is uncapped)
 #define ICON_BTN_SIZE 66        // QML 44 x 1.5 scale
+// Header controls get their own size: the 1.5x scale predates the 72 -> 60
+// header, and a 66 px circle in a 60 px bar overflows it and reads as a
+// giant button. 48 is what every other page's header control uses
+// (page_browse's back/refresh/search).
+#define HEADER_BTN_SIZE 48
+// Add-pattern picker. The row cap is the point: a widget per pattern across a
+// 1200-entry catalogue is the internal-RAM exhaustion STATE.md records, so the
+// search narrows the list instead. Card height clears the nav bar at 536.
+#define PICK_ROW_MAX 40
+#define PICK_ROW_H 56
+#define PICK_CARD_H 500
 
 // ---------------------------------------------------------------- page state
 
@@ -62,9 +73,16 @@ static lv_obj_t *s_mode_chips[2];
 static lv_obj_t *s_pause_chips[12];
 static lv_obj_t *s_clear_chips[4];
 
-// Modal (one at a time: create dialog or delete confirm)
+// Modal (one at a time: create dialog, delete confirm, or add-pattern picker)
 static lv_obj_t *s_modal_scrim;
 static lv_obj_t *s_modal_ta;
+
+// Add-pattern picker (lives inside the modal above)
+static lv_obj_t *s_pick_list;
+static lv_obj_t *s_pick_ta;
+static lv_obj_t *s_pick_kb;
+static lv_obj_t *s_pick_count_label;
+static char s_pick_filter[64];
 
 static const char *MODE_VALUES[2] = {"loop", "single"};
 static const char *MODE_LABELS[2] = {"Loop forever", "Play once"};
@@ -93,6 +111,8 @@ static void request_list_reload(void);
 static void request_det_reload(void);
 static void chips_refresh(void);
 static void list_row_clicked(lv_event_t *e);
+static void pick_row_clicked(lv_event_t *e);
+static void pick_modal_open(lv_event_t *e);
 
 // ------------------------------------------------------------ small helpers
 
@@ -257,7 +277,7 @@ static lv_obj_t *eyebrow(lv_obj_t *parent, const char *text)
 static lv_obj_t *icon_circle(lv_obj_t *parent, const char *symbol, lv_color_t color)
 {
     lv_obj_t *btn = plain(parent);
-    lv_obj_set_size(btn, ICON_BTN_SIZE, ICON_BTN_SIZE);
+    lv_obj_set_size(btn, HEADER_BTN_SIZE, HEADER_BTN_SIZE);
     lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_color(btn, th.pressed, LV_STATE_PRESSED);
@@ -412,6 +432,12 @@ static void modal_close(void)
         lv_obj_delete_async(s_modal_scrim);
         s_modal_scrim = NULL;
         s_modal_ta = NULL;
+        // Picker widgets are children of the scrim: drop the pointers in the
+        // same breath or the next pick_rebuild writes into deleted objects.
+        s_pick_list = NULL;
+        s_pick_ta = NULL;
+        s_pick_kb = NULL;
+        s_pick_count_label = NULL;
     }
 }
 
@@ -659,8 +685,10 @@ static void playlist_rewrite_job(void *arg)
     free(ctx);
 }
 
-// Rewrite = whole file: "# <name>" header + every remaining normalized line.
-static char *build_content_without(int skip_idx)
+// Rewrite = whole file: "# <name>" header + every kept line, in order.
+// skip_idx drops one entry (-1 keeps all); add_rel appends one (NULL adds none).
+// The board has no partial-edit route, so every edit re-uploads the whole file.
+static char *build_content(int skip_idx, const char *add_rel)
 {
     size_t cap = strlen(s_det_name) + 8;
     for (int i = 0; i < s_det_count; i++) {
@@ -668,6 +696,9 @@ static char *build_content_without(int skip_idx)
             continue;
         }
         cap += strlen(s_det_items[i]) + 16; // slack for "/patterns" prefix + '\n'
+    }
+    if (add_rel != NULL) {
+        cap += strlen(add_rel) + 16;
     }
     char *content = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
     if (content == NULL) {
@@ -683,6 +714,11 @@ static char *build_content_without(int skip_idx)
         }
         char norm[192];
         normalize_sd_path(s_det_items[i], norm, sizeof(norm));
+        off += (size_t)snprintf(content + off, cap - off, "%s\n", norm);
+    }
+    if (add_rel != NULL && off < cap) {
+        char norm[192];
+        normalize_sd_path(add_rel, norm, sizeof(norm));
         off += (size_t)snprintf(content + off, cap - off, "%s\n", norm);
     }
     return content;
@@ -705,7 +741,7 @@ static void det_remove_clicked(lv_event_t *e)
         return;
     }
     strlcpy(ctx->name, s_det_name, sizeof(ctx->name));
-    ctx->content = build_content_without(idx);
+    ctx->content = build_content(idx, NULL);
     if (ctx->content == NULL) {
         free(ctx);
         return;
@@ -716,6 +752,237 @@ static void det_remove_clicked(lv_event_t *e)
         return;
     }
     s_det_busy = true;
+}
+
+// --- Add pattern picker (ModernPlaylistPage.qml:381 "+" beside "Patterns") ---
+//
+// The reference pushes a whole PatternSelectorPage; here it is a modal over the
+// detail view, reusing the modal + keyboard recipes this page already has. The
+// catalogue is BORROWED from Browse (page_browse_pattern_list) rather than
+// loaded again — a second 1200-entry copy is exactly the internal-RAM bomb
+// STATE.md records. Rows are capped for the same reason: never build a widget
+// per pattern, make the search narrow it instead.
+
+static bool ci_contains(const char *hay, const char *needle)
+{
+    if (needle[0] == '\0') {
+        return true;
+    }
+    size_t nlen = strlen(needle);
+    for (const char *p = hay; *p != '\0'; p++) {
+        if (strncasecmp(p, needle, nlen) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// LVGL ctx. Rebuilds the visible rows for the current filter, under the one
+// lock the caller already holds so the whole list costs a single refresh.
+static void pick_rebuild(void)
+{
+    if (s_pick_list == NULL) {
+        return;
+    }
+    lv_obj_clean(s_pick_list);  // children only: the stepper hangs off the
+                                // scroller itself and must outlive rebuilds
+    const fw_str_list_t *pats = page_browse_pattern_list();
+    int shown = 0;
+    int matched = 0;
+    for (int i = 0; pats != NULL && i < pats->count; i++) {
+        if (!ci_contains(pats->items[i], s_pick_filter)) {
+            continue;
+        }
+        matched++;
+        if (shown >= PICK_ROW_MAX) {
+            continue;  // keep counting so the label can say how many are hidden
+        }
+        shown++;
+
+        lv_obj_t *row = plain(s_pick_list);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, PICK_ROW_H);
+        lv_obj_set_style_bg_color(row, th.card, 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(row, th.pressed, LV_STATE_PRESSED);
+        lv_obj_set_style_radius(row, TH_RADIUS_SM, 0);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_border_color(row, th.border_light, 0);
+        lv_obj_set_style_pad_hor(row, TH_SPACE_MD, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        // Index into Browse's list, re-bounds-checked on tap: the catalogue can
+        // be swapped by a reload while this modal is open.
+        lv_obj_add_event_cb(row, pick_row_clicked, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)i);
+
+        // Labels only -- lv_label clears CLICKABLE itself, so nothing here can
+        // swallow the row's tap the way a bare lv_obj would.
+        char shown_name[96];
+        display_name_of(pats->items[i], shown_name, sizeof(shown_name));
+        lv_obj_t *name = lv_label_create(row);
+        lv_label_set_text(name, shown_name);
+        lv_obj_set_flex_grow(name, 1);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_style_text_font(name, TH_FONT_BODY, 0);
+        lv_obj_set_style_text_color(name, th.text, 0);
+    }
+
+    if (matched == 0) {
+        ui_empty_state(s_pick_list, TH_ICON_SEARCH, "No patterns match", NULL);
+    }
+    if (s_pick_count_label != NULL) {
+        if (matched > shown) {
+            lv_label_set_text_fmt(s_pick_count_label, "first %d of %d - keep typing",
+                                  shown, matched);
+        } else {
+            lv_label_set_text_fmt(s_pick_count_label, "%d patterns", matched);
+        }
+    }
+}
+
+static void pick_row_clicked(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    const fw_str_list_t *pats = page_browse_pattern_list();
+    if (pats == NULL || idx < 0 || idx >= pats->count || s_det_items == NULL) {
+        modal_close();
+        return;
+    }
+    if (s_det_busy) {
+        // Same guard as det_remove_clicked: a rewrite built from the current
+        // snapshot is in flight, and a second one would be built from stale
+        // items and undo it.
+        return;
+    }
+    rewrite_ctx_t *ctx = calloc(1, sizeof(*ctx));
+    if (ctx == NULL) {
+        modal_close();
+        return;
+    }
+    strlcpy(ctx->name, s_det_name, sizeof(ctx->name));
+    ctx->content = build_content(-1, pats->items[idx]);
+    if (ctx->content == NULL) {
+        free(ctx);
+        modal_close();
+        return;
+    }
+    modal_close();
+    if (!submit_or_report(playlist_rewrite_job, ctx)) {
+        free(ctx->content);
+        free(ctx);
+        return;
+    }
+    s_det_busy = true;
+}
+
+static void pick_search_focused(lv_event_t *e)
+{
+    (void)e;
+    if (s_pick_kb != NULL) {
+        lv_keyboard_set_textarea(s_pick_kb, s_pick_ta);
+        lv_obj_remove_flag(s_pick_kb, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Applied on Enter / keyboard close / focus loss, never per keystroke: each
+// rebuild is a full-screen redraw on this panel (page_browse does the same).
+static void pick_search_apply(lv_event_t *e)
+{
+    (void)e;
+    if (s_pick_kb != NULL) {
+        lv_obj_add_flag(s_pick_kb, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_pick_ta == NULL) {
+        return;
+    }
+    char next[sizeof(s_pick_filter)];
+    trimmed_copy(next, sizeof(next), lv_textarea_get_text(s_pick_ta));
+    if (strcmp(next, s_pick_filter) != 0) {
+        strlcpy(s_pick_filter, next, sizeof(s_pick_filter));
+        pick_rebuild();
+    }
+}
+
+static void pick_modal_open(lv_event_t *e)
+{
+    (void)e;
+    if (s_modal_scrim != NULL || !s_showing_detail) {
+        return;
+    }
+    s_pick_filter[0] = '\0';
+
+    // Fixed height: the list needs real bounds for the stepper, and the card
+    // must clear the nav bar at 600 - TH_NAV_HEIGHT.
+    lv_obj_t *card = modal_card(720, LV_ALIGN_TOP_MID, TH_SPACE_SM);
+    lv_obj_set_height(card, PICK_CARD_H);
+
+    lv_obj_t *title_row = plain(card);
+    lv_obj_set_width(title_row, LV_PCT(100));
+    lv_obj_set_height(title_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(title_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(title_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(title_row, TH_SPACE_SM, 0);
+    lv_obj_t *title = modal_title(title_row, "Add pattern");
+    lv_obj_set_flex_grow(title, 1);
+    s_pick_count_label = lv_label_create(title_row);
+    lv_label_set_text(s_pick_count_label, "");
+    lv_obj_set_style_text_font(s_pick_count_label, TH_FONT_CAPTION, 0);
+    lv_obj_set_style_text_color(s_pick_count_label, th.text3, 0);
+
+    lv_obj_t *ta = lv_textarea_create(card);
+    s_pick_ta = ta;
+    lv_obj_set_scrollbar_mode(ta, LV_SCROLLBAR_MODE_OFF);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_placeholder_text(ta, TH_ICON_SEARCH "  Search patterns");
+    lv_textarea_set_max_length(ta, sizeof(s_pick_filter) - 1);
+    lv_obj_set_width(ta, LV_PCT(100));
+    lv_obj_set_height(ta, 48);
+    lv_obj_set_style_bg_color(ta, th.bg, 0);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(ta, TH_RADIUS_PILL, 0);
+    lv_obj_set_style_border_width(ta, 1, 0);
+    lv_obj_set_style_border_color(ta, th.border, 0);
+    lv_obj_set_style_border_color(ta, th.accent, LV_STATE_FOCUSED);
+    lv_obj_set_style_pad_hor(ta, TH_SPACE_LG, 0);
+    lv_obj_set_style_pad_ver(ta, 10, 0);  // centres the line in 48 px
+    lv_obj_set_style_text_font(ta, TH_FONT_BODY, 0);
+    lv_obj_set_style_text_color(ta, th.text, 0);
+    lv_obj_set_style_text_color(ta, th.text3, LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_add_event_cb(ta, pick_search_focused, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(ta, pick_search_focused, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ta, pick_search_apply, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(ta, pick_search_apply, LV_EVENT_CANCEL, NULL);
+    lv_obj_add_event_cb(ta, pick_search_apply, LV_EVENT_DEFOCUSED, NULL);
+
+    lv_obj_t *list_row = plain(card);
+    lv_obj_set_width(list_row, LV_PCT(100));
+    lv_obj_set_flex_grow(list_row, 1);
+    lv_obj_set_flex_flow(list_row, LV_FLEX_FLOW_ROW);
+
+    s_pick_list = plain(list_row);
+    lv_obj_set_height(s_pick_list, LV_PCT(100));
+    lv_obj_set_flex_grow(s_pick_list, 1);
+    lv_obj_set_flex_flow(s_pick_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_pick_list, TH_SPACE_SM, 0);
+    // Nothing drags on this panel; overflow gets an Up/Down column instead.
+    ui_page_stepper(list_row, s_pick_list);
+
+    lv_obj_t *cancel = ui_pill_button(card, "Cancel", th.text2, false);
+    lv_obj_set_width(cancel, LV_PCT(100));
+    lv_obj_add_event_cb(cancel, modal_cancel_clicked, LV_EVENT_CLICKED, NULL);
+
+    s_pick_kb = ui_keyboard_create(s_modal_scrim);
+    lv_keyboard_set_textarea(s_pick_kb, ta);
+    lv_obj_add_flag(s_pick_kb, LV_OBJ_FLAG_HIDDEN);
+    // Binding focuses the field; we hide the keyboard again, so drop the focus
+    // ring too or it sits lit with no keyboard (page_browse hit this).
+    lv_obj_remove_state(ta, LV_STATE_FOCUSED);
+
+    pick_rebuild();
 }
 
 // Runs under lvgl lock (job) or in the LVGL task.
@@ -950,7 +1217,12 @@ static lv_obj_t *list_row_create(int idx)
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, list_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
 
+    // Both children are decorative and sit on top of the row's touch target.
+    // A bare lv_obj is CLICKABLE by default, so leaving the flag set makes
+    // them eat the tap silently (no handler, no bubbling) and the row never
+    // fires -- the row's middle goes dead while its margins still work.
     lv_obj_t *badge = plain(row);
+    lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(badge, ICON_BTN_SIZE, ICON_BTN_SIZE);
     lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(badge, th.accent_soft, 0);
@@ -962,6 +1234,7 @@ static lv_obj_t *list_row_create(int idx)
     lv_obj_center(icon);
 
     lv_obj_t *col = plain(row);
+    lv_obj_remove_flag(col, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_flex_grow(col, 1);
     lv_obj_set_height(col, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
@@ -1044,7 +1317,18 @@ static void list_load_job(void *arg)
     // them slowly — fetch one at a time and bail as soon as the list reloads.
     // Capped, and the FIRST failure aborts the pass: on a busy board this
     // costs one timeout, never a timeout per row (the rows keep their names).
-    for (int i = 0; fresh && i < list.count && i < 12; i++) {
+    //
+    // The counts are COLLECTED here and written in one batch below. Writing
+    // each label as it arrived cost a full-screen redraw per playlist: this
+    // panel runs `full_refresh`, so any invalidation re-renders all 1024x600
+    // (~200 ms measured, see STATE.md's Browse page-fill pass), and the writes
+    // serialise against the fetches because lvgl_port_lock is the same mutex
+    // lvgl_port_task holds around lv_timer_handler. Taking the lock merely to
+    // READ the generation is cheap — it is invalidation that costs, not the
+    // lock — so the early-out below still runs every iteration.
+    int counts[12];
+    int got = 0;
+    for (int i = 0; fresh && i < list.count && i < (int)(sizeof(counts) / sizeof(counts[0])); i++) {
         char name[MAX_PL_NAME];
         strip_txt_copy(name, sizeof(name), list.items[i]);
         char path[96];
@@ -1054,12 +1338,21 @@ static void list_load_job(void *arg)
         if (fw_fetch_sd(path, &buf, &len) != ESP_OK) {
             break;
         }
-        int n = playlist_scan(buf, len, NULL, 0);
+        counts[i] = playlist_scan(buf, len, NULL, 0);
+        got = i + 1;
         free(buf);
         lvgl_port_lock(0);
-        fresh = (ctx->gen == s_list_gen);
-        if (fresh && i < s_pl_count && s_row_sub_labels[i] != NULL) {
-            lv_label_set_text_fmt(s_row_sub_labels[i], "%d patterns", n);
+        fresh = (ctx->gen == s_list_gen);  // list reloaded under us: stop fetching
+        lvgl_port_unlock();
+    }
+    if (got > 0) {
+        lvgl_port_lock(0);
+        if (ctx->gen == s_list_gen) {
+            for (int i = 0; i < got && i < s_pl_count; i++) {
+                if (s_row_sub_labels[i] != NULL) {
+                    lv_label_set_text_fmt(s_row_sub_labels[i], "%d patterns", counts[i]);
+                }
+            }
         }
         lvgl_port_unlock();
     }
@@ -1102,7 +1395,7 @@ static void build_list_view(lv_obj_t *page)
     lv_obj_set_height(spacer, 1);
 
     lv_obj_t *add = plain(header);
-    lv_obj_set_size(add, ICON_BTN_SIZE, ICON_BTN_SIZE);
+    lv_obj_set_size(add, HEADER_BTN_SIZE, HEADER_BTN_SIZE);
     lv_obj_set_style_radius(add, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(add, th.accent, 0);
     lv_obj_set_style_bg_opa(add, LV_OPA_COVER, 0);
@@ -1185,7 +1478,21 @@ static void build_detail_view(lv_obj_t *page)
     lv_obj_set_style_pad_all(left, TH_SPACE_LG, 0);
     lv_obj_set_style_pad_row(left, TH_SPACE_MD, 0);
 
-    eyebrow(left, "PATTERNS");
+    // Heading row: "PATTERNS" + the add-pattern button (QML puts a 40 px
+    // outlined + here and pushes PatternSelectorPage; ours opens a modal).
+    lv_obj_t *pat_head = plain(left);
+    lv_obj_remove_flag(pat_head, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_width(pat_head, LV_PCT(100));
+    lv_obj_set_height(pat_head, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(pat_head, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(pat_head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *pat_eyebrow = eyebrow(pat_head, "PATTERNS");
+    lv_obj_set_flex_grow(pat_eyebrow, 1);
+    lv_obj_t *add_pat = icon_circle(pat_head, TH_ICON_ADD, th.accent);
+    lv_obj_set_style_border_width(add_pat, 1, 0);
+    lv_obj_set_style_border_color(add_pat, th.accent, 0);
+    lv_obj_add_event_cb(add_pat, pick_modal_open, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *det_row = plain(left);
     lv_obj_set_width(det_row, LV_PCT(100));
