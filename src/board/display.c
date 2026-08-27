@@ -13,7 +13,12 @@
 
 static const char *TAG = "display";
 
-// 10 lines per bounce buffer keeps PSRAM DMA from starving the panel
+// 10 lines per bounce buffer keeps PSRAM DMA from starving the panel. Two are
+// allocated (1024 px * 2 B each), so this is 40 KB of internal DMA RAM.
+// Doubling to 20 was tried 2026-08-27 to buy headroom for a 32 MHz pixel clock
+// and did NOT stop the drift, while costing 41 KB internal free and halving the
+// largest contiguous block (119,723/63,488 -> 78,675/34,816). Reverted: the
+// pixel-clock ceiling is not bounce-buffer slack. See board.h BOARD_LCD_PCLK_HZ.
 #define BOUNCE_BUFFER_LINES 10
 
 static lv_display_t *s_disp;

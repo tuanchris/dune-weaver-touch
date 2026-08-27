@@ -41,7 +41,12 @@ static void set_defaults(app_settings_t *s)
     s->playlist_shuffle = true;
     strlcpy(s->playlist_run_mode, "loop", sizeof(s->playlist_run_mode));
     strlcpy(s->playlist_clear, "adaptive", sizeof(s->playlist_clear));
-    s->dark_mode = true;
+    // Light by default. The panel beats at ~24 Hz for any channel in roughly
+    // code 16..110, and the dark palette's large fills have to live at 0..12 to
+    // avoid it — which costs the whole elevation hierarchy (see theme.c).
+    // Light mode sits at 128+ everywhere and is simply clean. Tuan's call,
+    // 2026-08-27, after A/B on hardware.
+    s->dark_mode = false;
 }
 
 // Missing key (or a value that no longer fits) keeps the caller's default.

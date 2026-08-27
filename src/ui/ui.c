@@ -85,6 +85,132 @@ static void ui_debug_tab_tick(lv_timer_t *t)
 }
 #endif
 
+#ifdef UI_DEBUG_FLAT_FIELD
+#include "esp_log.h"
+// Panel-uniformity and flicker map. This board runs the panel at ~24 Hz
+// (board.h explains why it cannot go faster), and a frame-inverted panel beats
+// at half the refresh. That beat is invisible where the V-T curve is flat --
+// near white, near black, saturated primaries -- and visible where it is steep.
+// One screen of stacked bands finds those edges far faster than cycling
+// full-screen fills, because you can see which bands beat while their
+// neighbours sit still.
+//
+// Page 0: a grey ladder, labelled in % luminance (8-bit code value / 2.55, no
+//         gamma -- the same basis as the theme audit, so the numbers line up).
+// Page 1: the live theme's own tokens, brightest first. Whatever beats here is
+//         what to move in theme.c.
+// Tap anywhere to swap pages. Screen sleep stays un-armed in this build.
+
+static uint8_t s_flat_page;
+
+static void flat_band(lv_obj_t *root, lv_color_t c, bool light_text, const char *txt)
+{
+    lv_obj_t *b = lv_obj_create(root);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_width(b, LV_PCT(100));
+    lv_obj_set_flex_grow(b, 1);
+    lv_obj_set_style_bg_color(b, c, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    // A bare lv_obj is clickable by default and would swallow the page tap.
+    lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_font(l, TH_FONT_BODY, 0);
+    lv_obj_set_style_text_color(l, light_text ? lv_color_white() : lv_color_black(), 0);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 16, 0);
+    lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+}
+
+static void flat_build(lv_obj_t *root)
+{
+    lv_obj_clean(root);
+    if (s_flat_page == 0) {
+        // Bottom end, in 8-bit CODE VALUE — the axis that actually matters.
+        // Saturated blue (0,0,255) is 7% luminance and clean while 8% grey
+        // (20,20,20) flickers, so the beat tracks per-subpixel drive, not
+        // luminance: both rails are flat, the climb out of black is steep.
+        // This finds where the bad zone starts, and whether code 0 is clean.
+        static const uint8_t CODES[] = {0, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 160};
+        for (unsigned i = 0; i < sizeof(CODES) / sizeof(CODES[0]); i++) {
+            uint8_t v = CODES[i];
+            char buf[24];
+            lv_snprintf(buf, sizeof(buf), "code %u   (%u%%)", (unsigned)v,
+                        (unsigned)((v * 100u + 127u) / 255u));
+            flat_band(root, lv_color_make(v, v, v), v < 128, buf);
+        }
+    } else if (s_flat_page == 1) {
+        // Can a surface be told apart from black without entering the zone?
+        const struct {
+            const char *name;
+            lv_color_t c;
+            bool light_text;
+        } CAND[] = {
+            {"pure black  0,0,0", lv_color_hex(0x000000), true},
+            {"4,4,4", lv_color_hex(0x040404), true},
+            {"8,8,8", lv_color_hex(0x080808), true},
+            {"12,12,12", lv_color_hex(0x0C0C0C), true},
+            {"bg  23,19,16  (current)", lv_color_hex(0x171310), true},
+            {"surface  32,27,22  (current)", lv_color_hex(0x201B16), true},
+            {"card  42,36,29  (current)", lv_color_hex(0x2A241D), true},
+            {"deep blue  0,0,255", lv_color_hex(0x0000FF), true},
+            {"deep blue  0,0,160", lv_color_hex(0x0000A0), true},
+            {"accent  226,168,96", lv_color_hex(0xE2A860), false},
+        };
+        for (unsigned i = 0; i < sizeof(CAND) / sizeof(CAND[0]); i++) {
+            flat_band(root, CAND[i].c, CAND[i].light_text, CAND[i].name);
+        }
+    } else {
+        const struct {
+            const char *name;
+            lv_color_t c;
+            bool light_text;
+        } TOKENS[] = {
+            {"text", th.text, false},
+            {"preview_sand", th.preview_sand, false},
+            {"accent", th.accent, false},
+            {"text2", th.text2, false},
+            {"text3", th.text3, true},
+            {"preview_ring", th.preview_ring, true},
+            {"border", th.border, true},
+            {"card", th.card, true},
+            {"surface", th.surface, true},
+            {"bg", th.bg, true},
+        };
+        for (unsigned i = 0; i < sizeof(TOKENS) / sizeof(TOKENS[0]); i++) {
+            flat_band(root, TOKENS[i].c, TOKENS[i].light_text, TOKENS[i].name);
+        }
+    }
+    static const char *const NAMES[] = {"code ladder (bottom end)", "dark candidates",
+                                        "live theme tokens"};
+    ESP_LOGI("ui_dbg", "flat field page %u (%s)", s_flat_page, NAMES[s_flat_page]);
+}
+
+static void flat_tapped(lv_event_t *e)
+{
+    lv_obj_t *root = lv_event_get_user_data(e);
+    s_flat_page = (uint8_t)((s_flat_page + 1) % 3);
+    flat_build(root);
+}
+
+static void flat_field_create(void)
+{
+    lv_obj_t *root = lv_obj_create(lv_layer_sys());
+    lv_obj_remove_style_all(root);
+    lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(root, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(root, 0, 0);
+    lv_obj_set_style_pad_row(root, 0, 0);
+    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
+    lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(root, flat_tapped, LV_EVENT_CLICKED, root);
+    flat_build(root);
+}
+#endif
+
 static lv_obj_t *make_tab_button(lv_obj_t *nav, int idx)
 {
     lv_obj_t *btn = plain(nav);
@@ -168,7 +294,11 @@ void ui_init(void)
     }
     select_tab(0);
 
+#ifdef UI_DEBUG_FLAT_FIELD
+    flat_field_create();  // no screen sleep: the field has to outlast a long stare
+#else
     screen_sleep_init();
+#endif
 
 #ifdef UI_DEBUG_TAB_CYCLE
     // Crash repro: walk the tabs automatically (remove before release)

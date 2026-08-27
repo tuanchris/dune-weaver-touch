@@ -10,6 +10,31 @@
 
 #define BOARD_LCD_H_RES 1024
 #define BOARD_LCD_V_RES 600
+// 21 MHz, Waveshare's value. This IS the ceiling — measured 2026-08-27, do not
+// retry without new information.
+//
+// Why it matters: 1369x637 = 872,053 clocks/frame, so this is ~24 Hz, and a
+// frame-inverted panel beats at half the refresh. That puts an 11-13 Hz flicker
+// on the glass, right at peak eye sensitivity. It is invisible at white, black
+// and saturated primaries (flat parts of the V-T curve — both polarities land
+// at the same luminance) and plainly visible on greys, which is the whole of
+// the "flickering on low contrast colours" symptom. PCLK is the only lever:
+// peak framebuffer DMA demand is set by PCLK alone, so trimming the porches
+// raises refresh while REMOVING the blanking slack the bounce buffer refills
+// in, which is strictly worse.
+//
+// What was tried on hardware, all of it drifting (image jumps and loses
+// centring — RGB DMA underrun, Waveshare's "screen drifting"):
+//   40 MHz (160/4, 2.0x)  -> unusable in seconds
+//   32 MHz (160/5, 1.6x)  -> jumped about once a second
+//   32 MHz + bounce buffers doubled to 20 lines (80 KB internal) -> no better,
+//       which is the useful result: the binding constraint is NOT bounce-buffer
+//       slack, so buying it with internal RAM is a dead end.
+// Untried rungs are 160/7 (22.86 MHz, 13.1 Hz beat) and 160/6 (26.67 MHz,
+// 15.3 Hz beat) — both still inside the 8-15 Hz band, so neither solves it.
+// Treat the flicker as a property of this panel + SoC and mitigate in the
+// theme instead: keep large fills out of the mid-grey band where the V-T curve
+// is steep and the beat is visible.
 #define BOARD_LCD_PCLK_HZ (21 * 1000 * 1000)
 
 // RGB timings for the 1024x600 panel
@@ -52,7 +77,10 @@
 // touch controller (GT911 latches I2C address 0x5D while INT is held low).
 esp_err_t board_init(void);
 
-// Backlight is the CH422G DISP line (EXIO2) — on/off only, no PWM.
+// On/off only, no PWM. EXIO2 is called DISP in Waveshare's netlist but reaches
+// only the AP3032 boost driver's CTRL pin; the panel's own DISP input is tied
+// to 3V3 through R30, so this never stops the panel refreshing. Off at boot —
+// app_main lights it once the first frame exists.
 esp_err_t board_backlight(bool on);
 
 // TF-card chip select (CH422G EXIO4, active low). sdcard.c holds it selected

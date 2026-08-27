@@ -13,6 +13,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_system.h"  // esp_restart, for the theme toggle
 
 #include "../../app/jobs.h"
 #include "../../app/state.h"
@@ -327,6 +328,23 @@ static void settings_save_job(void *arg)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "settings_save: %s", esp_err_to_name(err));
     }
+}
+
+// Theme colours are baked into every widget at create() time and preview tiles
+// composite th.preview_* when they load, so re-theming means rebuilding the
+// whole widget tree and dropping the tile cache. Rebooting does both, costs
+// ~5 s, and is honest; a silent toggle that only applies on the NEXT restart
+// reads as broken, which is exactly how it was found. Runs on the job worker,
+// not the LVGL task, so the NVS write is off the render path.
+static void settings_save_restart_job(void *arg)
+{
+    (void)arg;
+    esp_err_t err = settings_save();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "settings_save before restart: %s", esp_err_to_name(err));
+    }
+    ESP_LOGI(TAG, "restarting to apply theme");
+    esp_restart();
 }
 
 // ---------------------------------------------------------------------------
@@ -1298,10 +1316,11 @@ static void night_mode_toggled(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target_obj(e);
     settings_get()->dark_mode = lv_obj_has_state(sw, LV_STATE_CHECKED);
-    if (jobs_submit(settings_save_job, NULL) != ESP_OK) {
-        ESP_LOGW(TAG, "settings save deferred: job queue full");
+    // Applies on restart, and does the restart itself — see
+    // settings_save_restart_job for why a live retheme is not worth it here.
+    if (jobs_submit(settings_save_restart_job, NULL) != ESP_OK) {
+        ESP_LOGW(TAG, "theme change deferred: job queue full");
     }
-    // Takes effect on restart; live retheme is a later increment.
 }
 
 // ChoiceChip recipe: TH_TOUCH_TARGET pill; selected = accent_soft fill +

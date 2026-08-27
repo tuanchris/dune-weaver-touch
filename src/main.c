@@ -33,8 +33,20 @@ static void heap_report_cb(void *arg)
 
 void app_main(void)
 {
-    ESP_ERROR_CHECK(settings_init());  // before the panel: NVS does flash ops
+    // board_init BEFORE settings_init so the CH422G write that clears DISP (in
+    // the touch-reset sequence) is the first thing that happens: until it lands,
+    // R2 (4.7K to 5V) holds the backlight boost enabled over a panel the RGB
+    // peripheral has not started driving — the violet wash with the bright edge,
+    // on every boot and reset. Measured, this ordering is worth ~7 ms and no
+    // more: app_main does not start until 655 ms (bootloader + PSRAM init), and
+    // the wash covers that whole window. Firmware CANNOT fix it — removing R2
+    // and fitting R3 (100K, footprint already there) leaves CTRL low until the
+    // expander drives it, and that is the only thing that will. Kept anyway
+    // because earliest-possible is still the right order, and NVS is unaffected:
+    // nothing here starts the panel, so the cache-disable hazard that keeps
+    // settings_init ahead of display_init is untouched.
     ESP_ERROR_CHECK(board_init());
+    ESP_ERROR_CHECK(settings_init());  // still before the panel: NVS does flash ops
     // Before ui_init: the Browse page checks for the pattern card at build
     // time (manifest + previews live on the panel's local TF card).
     if (sdcard_mount() != ESP_OK) {

@@ -82,6 +82,35 @@ gitignored. Flash offsets live in `IMAGES` at the top of the script and mirror
 re-read that file rather than editing the offsets from memory. Note the S3 boots
 its bootloader from `0x0`, not the `0x1000` you may remember from the ESP32.
 
+## Bumping the version
+
+The app-descriptor version — what `ota_version()` returns, what the OTA compare
+uses, and what the panel prints at boot — comes from **`version.txt`** in the
+project root. `CONFIG_APP_PROJECT_VER_FROM_CONFIG` is deliberately unset, so
+nothing in sdkconfig overrides it.
+
+**PlatformIO does not track `version.txt` as a build dependency.** It is read at
+CMake *configure* time, so editing it and running `pio run` rebuilds nothing and
+you get the OLD version in the image — silently. Touching sources or deleting
+component object files does not help either; only a reconfigure does:
+
+```sh
+echo 0.1.2 > version.txt
+rm -f .pio/build/waveshare-5b/CMakeCache.txt
+pio run -t upload
+```
+
+Then **confirm it on the board**, because this fails quietly and a release whose
+binary reports the previous version breaks the OTA compare for everyone on it:
+
+```
+I (650) app_init: App version:      0.1.2
+I (4783) ota: update server up on :80 (fw=0.1.2 ...)
+```
+
+CI is unaffected — `tools/build_release.py` runs on a clean runner, so it always
+configures fresh.
+
 ## Before you tag
 
 Hardware gates release here; the sim does not reproduce internal-RAM

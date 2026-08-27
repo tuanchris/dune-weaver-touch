@@ -17,10 +17,18 @@ static const char *TAG = "board";
 #define EXIO_BIT_DISP 0x04
 #define EXIO_BIT_LCD_RST 0x08
 #define EXIO_BIT_SD_CS 0x10
-// Run state: everything released, backlight on, SD deselected (= old 0x1E).
-#define EXIO_RUN_DEFAULT (EXIO_BIT_TP_RST | EXIO_BIT_DISP | EXIO_BIT_LCD_RST | EXIO_BIT_SD_CS)
-#define EXIO_TP_RESET_LOW 0x2C
-#define EXIO_TP_RESET_HIGH 0x2E
+// Run state: everything released, SD deselected, backlight OFF — app_main
+// lights it once the first frame is built.
+#define EXIO_RUN_DEFAULT (EXIO_BIT_TP_RST | EXIO_BIT_LCD_RST | EXIO_BIT_SD_CS)
+// Waveshare's demo values (0x2C/0x2E) with DISP cleared. R2 (4.7K to 5V) holds
+// the AP3032's CTRL high from the instant power is applied, so the panel is lit
+// through the whole un-driven window: RGB timing does not start until
+// display_init, and an unaddressed cell under the backlight is a violet wash
+// with every non-uniformity it owns on show. Setting DISP here made app_main's
+// "first frame is built; light the panel" a no-op and put ~3 s of that wash on
+// every boot and reset — it is now bounded by the time to the first I2C write.
+#define EXIO_TP_RESET_LOW 0x28
+#define EXIO_TP_RESET_HIGH 0x2A
 
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_ch422g_mode;

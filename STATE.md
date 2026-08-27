@@ -1,4 +1,104 @@
-# STATE — 2026-08-26
+# STATE — 2026-08-27
+
+## The panel flicker is the theme, not the driver (2026-08-27)
+
+Tuan reported "white flashes" that turned out to be flicker on low-contrast
+colours, chased through several wrong turns (write-up below). Resolved:
+**light theme, no flicker at all.** The panel is fine; dark mode was the bug.
+
+Mechanism: 1369x637 = 872,053 clocks/frame, so Waveshare's 21 MHz PCLK is
+~24 Hz, and a frame-inverted panel beats at half the refresh — 11-13 Hz, peak
+eye sensitivity. Invisible where the V-T curve is flat, visible where it is
+steep. The `-DUI_DEBUG_FLAT_FIELD` band ladder (rewritten this session: one
+screen of stacked luminance bands, plus a page of the live theme's tokens by
+name) put a number on it: **<=45% flickers, >=55% clean.**
+
+That is a verdict on the palette. Dark mode has 9 of its 10 large fills at
+8-22% — `bg` 7.7, `preview_dish` 9.2, `surface` 10.9, `card` 14.4 — so the
+entire UI sits in the band. Light mode has them at 78-94%. One switch, gone.
+
+**Dead ends, recorded so nobody repeats them.** All reverted:
+
+- Raising PCLK. 40 MHz (160/4) drifted unusably in seconds; 32 MHz (160/5)
+  jumped ~1/s; 32 MHz with bounce buffers doubled to 80 KB internal was no
+  better — which is the useful result, because it proves the ceiling is
+  sustained PSRAM bandwidth (LVGL writes one framebuffer while DMA reads the
+  other) and not bounce-buffer slack. Buying slack with internal RAM is a dead
+  end; the cost was 41 KB free and half the largest contiguous block.
+- Trimming porches to buy refresh at fixed PCLK: strictly worse. Peak DMA
+  demand is set by PCLK alone, so this raises refresh by REMOVING the blanking
+  slack the bounce buffer refills in.
+- A theory that backlight-off depolarizes the panel (from a widely-repeated
+  forum post). Wrong for this board — see the EXIO2/R30 entry below. Its
+  observations were real, its power-supply explanation was not: the panel's
+  logic runs off 3V3 via R29, the LEDs off a separate AP3032 boost.
+
+**Also fixed on the way through:**
+
+- Night mode was a dead switch. `page_control.c` saved `dark_mode` to NVS with
+  a comment saying live retheme was a later increment, so nothing applied until
+  the next restart — indistinguishable from broken, and it hid the one setting
+  that fixes the flicker. It now saves and reboots itself (~5 s). A real live
+  retheme means rebuilding the whole widget tree (colours are baked in at
+  `create()`) plus `thr_preview_clear_ram()`; not worth it for a setting
+  flipped roughly never.
+- `screen_sleep.c` alternates the shield black/white every 30 s so sleep no
+  longer holds one frame in the glass for hours, and wake counts 3 refreshes of
+  confirmed black before lighting the panel (two PSRAM framebuffers with
+  avoid_tearing mean `REFR_READY` fires before the swap reaches the glass).
+- `board.c` clears DISP from `EXIO_TP_RESET_*` and `EXIO_RUN_DEFAULT`, and
+  `board_init` runs before `settings_init`. Worth ~7 ms, not the ~650 ms first
+  claimed: `app_main` does not start until 655 ms and R2 holds the backlight on
+  across that whole window. Only removing R2 and fitting R3 (100K, footprint
+  present) gives a dark boot.
+
+**Open:** the shipped default is still dark (`settings.c`), so a fresh panel
+boots into the flickering theme. Not flipped — this is N=1 and the beat may be
+a Vcom trim specific to this unit. Needs a second panel before changing what
+everyone gets.
+
+
+## Sleep no longer bakes a frame into the glass (2026-08-27)
+
+Tuan hit a blotch on the panel and found a forum thread blaming backlight-off
+for depolarizing these Waveshare panels. Pulled the schematic instead of
+trusting it. **EXIO2 does not gate this panel.** It reaches exactly one pin —
+CTRL on U2 (AP3032KTR-G1, the backlight boost) — and the LCD's own DISP input,
+connector pin 31, is tied to 3V3 through R30 (0R). The 4.3 genuinely does share
+that net (its pin 31 carries the DISP net label), which is where the internet
+advice comes from. It does not apply here, so backlight off is a true off and
+always was.
+
+Which means the panel keeps refreshing the whole time it is dark, and the sleep
+shield was driving one unchanging frame into the cell for as long as the table
+idled. Confirmed with `-DUI_DEBUG_FLAT_FIELD` on the board: blotch invisible on
+white, invisible on saturated R/G/B, plain at light and mid grey with visible
+flicker there, faint glow on black — the V-T signature of a residual DC bias,
+not pressure or thermal mura, and it clears after a night unpowered. Localized
+because ion mobility follows temperature, so it settles wherever the PCB runs
+warm behind the glass.
+
+Two fixes, both flashed and verified:
+
+- `screen_sleep.c` flips the shield black/white every 30 s while asleep, which
+  cancels the bias instead of accumulating it and is invisible with the LEDs
+  off. Wake had to move off `LV_EVENT_PRESSED` — the field may be white at that
+  instant and a full refresh is ~200 ms here, so a quick tap releases before
+  black lands. It now repaints black, arms `s_wake_pending`, and lights the
+  panel from `LV_EVENT_REFR_READY`, the one point where the frame is known to
+  be on the glass.
+- `board.c` clears DISP from `EXIO_TP_RESET_*` and `EXIO_RUN_DEFAULT`. R2 (4.7K
+  to 5V) holds CTRL high from power-on, so the panel was lit through the whole
+  un-driven window — ~3 s of violet wash on every boot and reset, and it made
+  app_main's "first frame is built; light the panel" a no-op. Now bounded by
+  the time to the first I2C write (~0.7 s).
+
+Board: boots clean, no errors or warnings, sleeps at 62 s, heap flat at
+119,763 / 63,488 across the flips.
+
+Open: PWM dimming still needs the hardware mod — cut CTRL from EXIO2, wire it
+to GPIO6 (the only unallocated pin in Waveshare's own GPIO table, not broken
+out to a header), drive it with LEDC. Not needed for off, only for brightness.
 
 ## Control page reordered: TABLE first (2026-08-26, Tuan's direction)
 

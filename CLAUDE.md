@@ -71,6 +71,21 @@ doubt, read the QML source — do not invent behavior.
 
 - 1024×600 RGB565 parallel panel, PCLK 21 MHz, porches H 145/170/30, V 23/12/2,
   `pclk_active_neg=1`. Pin map lives in `src/board/board.h`.
+- **The panel flickers below ~45% luminance and there is no firmware fix.**
+  1369×637 = 872,053 clocks/frame, so 21 MHz is ~24 Hz, and a frame-inverted
+  panel beats at half the refresh — an 11–13 Hz flicker, peak eye sensitivity.
+  It is invisible where the V-T curve is flat and visible where it is steep.
+  Measured on hardware 2026-08-27 with the band ladder below: **≤45% flickers,
+  ≥55% is clean.** PCLK is the only lever and the S3 cannot pay for it — peak
+  framebuffer DMA is set by PCLK alone, so trimming porches buys refresh while
+  removing the blanking slack the bounce buffer refills in. 40 MHz (160/4) was
+  unusable in seconds; 32 MHz (160/5) jumped about once a second; 32 MHz with
+  bounce buffers doubled to 80 KB internal was no better, which proves the
+  limit is sustained PSRAM bandwidth, not buffer slack. All reverted. **The
+  consequence is the theme:** dark mode puts 9 of its 10 large fills at 8–22%
+  (`bg` 7.7, `surface` 10.9, `card` 14.4, `preview_dish` 9.2) and the whole UI
+  beats; light mode puts them at 78–94% and the panel is clean. Do not "fix"
+  the flicker in the driver — pick colours above 55%.
 - 16 MB **quad** flash (eFuse), 8 MB **octal** PSRAM → `FLASHMODE_QIO` +
   `SPIRAM_MODE_OCT`. Framebuffers live in PSRAM; bounce buffers are mandatory.
 - `CONFIG_SPIRAM_XIP_FROM_PSRAM` (+FETCH_INSTRUCTIONS/RODATA) is REQUIRED:
@@ -90,11 +105,31 @@ doubt, read the QML source — do not invent behavior.
   symptoms: corrupted backtraces containing 0xa5a5a5a5 and StoreProhibited in
   FreeRTOS portasm. `FREERTOS_WATCHPOINT_END_OF_STACK` is enabled so any
   recurrence faults precisely. To reproduce render crashes hands-free, build
-  with `-DUI_DEBUG_TAB_CYCLE` (auto-cycles tabs every 4 s).
+  with `-DUI_DEBUG_TAB_CYCLE` (auto-cycles tabs every 4 s). For panel
+  uniformity and the flicker band, `-DUI_DEBUG_FLAT_FIELD` puts a full-screen
+  band ladder above everything with sleep disabled: page 0 is a grey ladder
+  labelled in % luminance (100…8), page 1 is the live theme's own tokens by
+  name, tap to swap. Stacked bands beat cycling full-screen fills — a band
+  that flickers sits right against ones that do not, so the edges are obvious.
+  This is also how to tell real image sticking from what an un-driven panel
+  always looks like (backlight on, RGB timing stopped = a violet wash with
+  every non-uniformity on show; that is normal, not damage).
 - CH422G IO expander has no register pointer — each function is an I2C address:
   write `0x01` to addr `0x24` (all-output mode), then a bitmask to addr `0x38`.
   EXIO1=TP_RST, EXIO2=DISP/backlight, EXIO3=LCD_RST, EXIO4=SD_CS. Backlight is
   on/off only (no PWM).
+- **EXIO2 does not stop the panel, despite being named DISP.** Verified on
+  `ESP32-S3-Touch-LCD-5-Sch.pdf`: it reaches exactly one pin, CTRL on U2
+  (AP3032KTR-G1, the backlight boost), while the LCD's own DISP input —
+  connector pin 31 — is tied to 3V3 through R30 (0R). The 4.3 *does* share
+  that net between panel and backlight, which is where the internet's
+  "backlight off depolarizes the panel" advice comes from; it does not apply
+  here. Consequences: backlight off is a true off and safe, the panel keeps
+  refreshing whatever is in the framebuffer the whole time it is dark, and a
+  motionless sleep shield therefore drives one frame into the glass for hours
+  (see `screen_sleep.c` — that is real and it is what the repolarize flip is
+  for). PWM dimming would need CTRL cut from EXIO2 and wired to GPIO6, the
+  only unallocated pin in Waveshare's own GPIO table and not broken out.
 - GT911 latches I2C address 0x5D only if INT (GPIO4) is held low through reset —
   that's why `board_init()` drives GPIO4 as an output during the reset dance.
 
