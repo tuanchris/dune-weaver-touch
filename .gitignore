@@ -16,3 +16,6 @@ sim/shot_layer*.raw
 sim/shot.req
 sim/shot.done
 sim/selftest_*.raw
+
+# Release staging (tools/build_release.py)
+release/

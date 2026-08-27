@@ -1,0 +1,149 @@
+name: Release
+
+# Cut a Dune Weaver Touch release when a `v*` tag is pushed: build the
+# waveshare-5b firmware via tools/build_release.py (flat .bin images +
+# manifest.json + a convenience zip) and publish them as GitHub Release assets.
+#
+#   git tag -a v0.1.1 -F notes.md
+#   git push origin v0.1.1
+#
+# or trigger manually against an existing tag from the Actions tab.
+#
+# Ported from dune-weaver-firmware's release.yml, minus two steps that repo
+# needs and this one does not: the unprefixed `firmware.bin` alias (for the
+# mobile app's table-OTA picker) and committing artifacts to the default branch
+# (dune-weaver-installer reads releases/<tag>/ from the FIRMWARE repo and has no
+# knowledge of the touch panel). Adding the latter would grow this repo by
+# ~1.7 MB per release forever with nothing reading it -- if the installer ever
+# learns about the panel, port that step then.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tags must be present: the dispatch fallback below and
+                          # the annotated-tag re-fetch both need full history
+
+      - name: Resolve the release tag
+        run: |
+          # The tag being released is the ref that TRIGGERED the run, not
+          # whatever `git describe` picks: describe tie-breaks arbitrarily when a
+          # commit carries more than one tag, and cutting a final release at the
+          # same commit as its last RC does exactly that. The firmware repo
+          # shipped a whole release under its RC's name that way.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="$(git describe --tags --abbrev=0)"
+            echo "::notice::dispatched from ${{ github.ref_type }} '${{ github.ref_name }}'; falling back to $TAG"
+          fi
+          echo "DW_RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "releasing $TAG"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          # ESP-IDF 5.5 + the xtensa toolchain is a slow first fetch, and the
+          # managed components (LVGL 9, esp_lvgl_port, gt911, mdns) land under
+          # the project, so cache the build dir's component cache too.
+          path: |
+            ~/.platformio
+            ~/.espressif
+          key: platformio-waveshare-5b-${{ runner.os }}-${{ hashFiles('platformio.ini', 'src/idf_component.yml') }}
+          restore-keys: platformio-waveshare-5b-${{ runner.os }}-
+
+      - name: Build release artifacts
+        run: python3 tools/build_release.py
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Same tag the build staged under release/<tag>/ (both read
+          # DW_RELEASE_TAG), so the asset glob below cannot miss.
+          TAG="$DW_RELEASE_TAG"
+
+          # Release notes are the annotated tag's BODY -- everything after the
+          # subject line. actions/checkout leaves the triggering tag as a
+          # LIGHTWEIGHT ref pointing straight at the commit, and on a lightweight
+          # tag %(contents:body) yields the COMMIT message body, which silently
+          # published commit messages as release notes in the firmware repo
+          # through v0.1.16. Re-fetch the real tag object and only trust the
+          # annotation when the ref actually resolves to one.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
+          if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
+            NOTES="$(git for-each-ref "refs/tags/$TAG" --format='%(contents:body)')"
+          else
+            echo "::warning::$TAG is not an annotated tag; falling back to generated notes"
+            NOTES=""
+          fi
+
+          # A pre-release suffix (v0.1.1-rc1, v0.2.0-beta2) ships as a GitHub
+          # PRE-RELEASE, so /releases/latest keeps pointing at the last final
+          # release and an RC does not read as an update.
+          PRERELEASE=""
+          case "$TAG" in
+            *-*) PRERELEASE="--prerelease"
+                 echo "$TAG has a pre-release suffix; publishing as a pre-release" ;;
+          esac
+
+          # `gh release create` FAILS if the release already exists, and that is
+          # deliberate -- it is what caught the firmware repo publishing a final
+          # release under its RC's tag. Do not soften it into an upsert.
+          if [ -n "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            printf '%s\n' "$NOTES" > "$RUNNER_TEMP/relnotes.md"
+            gh release create "$TAG" --title "$TAG" $PRERELEASE \
+              --notes-file "$RUNNER_TEMP/relnotes.md" \
+              "release/$TAG"/*
+          else
+            # --generate-notes only summarizes merged PRs, so for direct-to-main
+            # commits it is a bare "Full Changelog" link. Always give the tag a
+            # body; this is the last resort, not the plan.
+            gh release create "$TAG" --title "$TAG" $PRERELEASE \
+              --generate-notes \
+              "release/$TAG"/*
+          fi
+
+      - name: Report what was published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A release whose notes read like a commit message is the symptom of
+          # the lightweight-tag trap above; surface it in the run summary rather
+          # than leaving it to be noticed on the releases page.
+          TAG="$DW_RELEASE_TAG"
+          {
+            echo "### Published \`$TAG\`"
+            echo
+            echo "| asset | bytes |"
+            echo "|---|---|"
+            gh release view "$TAG" --json assets \
+              --jq '.assets[] | "| \(.name) | \(.size) |"'
+            echo
+            echo "**Notes (first 5 lines):**"
+            echo
+            echo '```'
+            gh release view "$TAG" --json body --jq .body | head -5
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
