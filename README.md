@@ -40,7 +40,7 @@ If the port doesn't enumerate, hold BOOT while plugging in, then release.
 
 ## Status
 
-Increment 2 — networked and live (needs on-hardware walkthrough):
+Networked and live on hardware — all five pages walked against a real table:
 
 - Hardware bring-up: RGB panel + GT911 touch + LVGL 9 (verified on the board)
 - WiFi provisioning from the Control page (scan, on-screen keyboard, join),
@@ -52,8 +52,38 @@ Increment 2 — networked and live (needs on-hardware walkthrough):
   run pattern with clear modes, transport (pause/resume/stop/skip on a fast
   worker lane), speed, LED effects/palettes/colors + ball tracker, homing,
   goto, restart, auto-play (`$Playlist/Autostart`), clock sync
-- On-device `.thr` preview renderer with LittleFS + RAM (refcounted) caching
+- Pattern previews off a TF card: `tools/make_pattern_sd.py` renders each `.thr`
+  to a 300×300 4-bit alpha mask, and the panel composites it with the theme's
+  colours through a RAM LRU. The panel itself never renders or stores previews —
+  no card just means placeholder dishes (see `docs/PORTING_NOTES.md` §6/§7a)
+- Outfit + Material Icons Round fonts, screen sleep timeout, and a UI simulator
+  (`sim/`) that builds the ui/app/render/net layers unmodified against LVGL 9 +
+  SDL2, so UI and protocol work needs no board
 
-Deferred to increment 3: Outfit + Material Icons fonts (Montserrat stand-ins
-today), screen sleep timeout, live night/day retheme (applies after restart).
-`docs/PORTING_NOTES.md` is the protocol/UX contract.
+Deferred: live night/day retheme (applies after restart), and a playlist
+manifest route on the table so a playlist list costs one request instead of
+`1 + N`. `docs/PORTING_NOTES.md` is the protocol/UX contract; `STATE.md` has
+the current validation state and backlog.
+
+## License
+
+Dune Weaver Touch is available under a **dual license**, the same terms as the
+rest of Dune Weaver:
+
+### Open Source License (GPL-3.0)
+
+For open-source projects and personal use, this firmware is licensed under the
+[GNU General Public License v3.0](LICENSE-GPL-3.0).
+
+You are free to use, modify, and distribute this software under GPL-3.0 terms,
+provided that derivative works are also licensed under GPL-3.0 and source code
+is made available.
+
+### Commercial License
+
+For commercial use, proprietary applications, OEM/embedded deployments, or if
+you cannot comply with GPL-3.0 requirements, a commercial license is available.
+
+Contact: hello@duneweaver.com
+
+See the [LICENSE](LICENSE) file for full details.
