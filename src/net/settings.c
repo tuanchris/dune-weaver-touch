@@ -41,12 +41,23 @@ static void set_defaults(app_settings_t *s)
     s->playlist_shuffle = true;
     strlcpy(s->playlist_run_mode, "loop", sizeof(s->playlist_run_mode));
     strlcpy(s->playlist_clear, "adaptive", sizeof(s->playlist_clear));
-    // Light by default. The panel beats at ~24 Hz for any channel in roughly
-    // code 16..110, and the dark palette's large fills have to live at 0..12 to
-    // avoid it — which costs the whole elevation hierarchy (see theme.c).
-    // Light mode sits at 128+ everywhere and is simply clean. Tuan's call,
-    // 2026-08-27, after A/B on hardware.
+    // Theme default is a PANEL property, not a taste. The 5B beats at ~24 Hz
+    // for any channel in roughly code 16..110, and the dark palette's large
+    // fills have to live at 0..12 to avoid it — which costs the whole
+    // elevation hierarchy (see theme.c). Light sits at 128+ and is simply
+    // clean. Tuan's call, 2026-08-27, after A/B on hardware.
+    //
+    // The 7 does not have the problem: 820 x 500 @ 16 MHz is ~39 Hz, so its
+    // frame-inversion beat lands near 19.5 Hz, clear of the 8-15 Hz band.
+    // CONFIRMED on hardware 2026-08-29 — no flicker — so it gets the dark
+    // theme the design was built around.
+    //
+    // This is the default for a fresh NVS only; a stored choice always wins.
+#if defined(BOARD_WAVESHARE_7)
+    s->dark_mode = true;
+#else
     s->dark_mode = false;
+#endif
 }
 
 // Missing key (or a value that no longer fits) keeps the caller's default.

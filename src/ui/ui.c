@@ -660,7 +660,7 @@ lv_obj_t *ui_pill_button(lv_obj_t *parent, const char *text, lv_color_t color, b
 }
 
 // Shared on-screen keyboard, styled from the theme (LVGL's default keyboard
-// is the stock light one — jarring against the night palette). One recipe
+// is the stock light one — jarring against the dark palette). One recipe
 // for every page: 280 px tall, bottom-aligned in its parent, surface ground,
 // card keys, amber-tinted control keys.
 // ---------------------------------------------------------- paged scrolling

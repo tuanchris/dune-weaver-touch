@@ -10,7 +10,7 @@
 //     read is nearly the whole cost — and beats even a 160 px RGB565 tile.
 //   * Resampling ONE 8-bit channel to reach 160 costs ~3 ms; resampling three
 //     packed RGB565 channels cost ~20.
-//   * Tiles carry no colour, so night/day retheming needs no card re-prep.
+//   * Tiles carry no colour, so dark/light retheming needs no card re-prep.
 //     The dish/ring/sand colours are theme tokens (th.preview_*).
 // Measured lossless enough: 4-bit alpha lands within 6/255 of the 8-bit
 // composite, under the RGB565 step of 8 this panel quantises to anyway.

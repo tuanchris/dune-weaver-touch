@@ -16,7 +16,7 @@ typedef struct {
     bool playlist_shuffle;     // default true
     char playlist_run_mode[8]; // "loop" | "single"; default "loop"
     char playlist_clear[20];   // UI name (adaptive/clear_center/clear_perimeter/none)
-    bool dark_mode;            // default FALSE — see settings.c (panel flicker)
+    bool dark_mode;            // default: 5B false (flicker), 7 true — settings.c
 } app_settings_t;
 
 // nvs_flash_init + load (missing keys get defaults).

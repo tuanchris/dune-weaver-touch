@@ -3,7 +3,7 @@
 theme_colors_t th;
 static bool s_dark = true;
 
-static void apply_night(void)
+static void apply_dark(void)
 {
     // DARK PALETTE — constrained by the panel, not by taste. It flickers for any
     // channel in roughly code 16..110 (measured on hardware 2026-08-27, see
@@ -51,7 +51,7 @@ static void apply_night(void)
     th.preview_sand = lv_color_hex(0xdcd9d2); // 220,217,210 — matches accent, was 255 // 255,255,255
 }
 
-static void apply_day(void)
+static void apply_light(void)
 {
     th.bg = lv_color_hex(0xe0d9ca); // -12/ch, was #ECE5D6
     th.surface = lv_color_hex(0xe9e4d9); // -12/ch, was #F5F0E5
@@ -71,8 +71,8 @@ static void apply_day(void)
     th.danger = lv_color_hex(0xb0431d);
     th.danger_pressed = lv_color_hex(0x8f3517);
     // NEW and not yet reviewed against the reference app: day-mode previews
-    // never existed before (tiles baked the night dish, so day mode showed
-    // night previews). Dark strokes on a light dish is the honest inversion;
+    // never existed before (tiles baked the dark dish, so light mode showed
+    // dark previews). Dark strokes on a light dish is the honest inversion;
     // eyeball it on glass before treating these as settled.
     th.preview_dish = lv_color_hex(0xdcd5c4); // -12/ch, was #E8E1D0
     th.preview_ring = lv_color_hex(0xc6bba2); // -12/ch, was #D2C7AE
@@ -88,9 +88,9 @@ void theme_set_dark(bool dark)
 {
     s_dark = dark;
     if (dark) {
-        apply_night();
+        apply_dark();
     } else {
-        apply_day();
+        apply_light();
     }
 }
 

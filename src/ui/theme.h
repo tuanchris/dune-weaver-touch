@@ -179,14 +179,16 @@ typedef struct {
     lv_color_t danger_pressed;
     // Preview dish. Card tiles are bare 4-bit coverage masks (PORTING_NOTES
     // §7a), so these three are what thr_preview.c composites them through —
-    // which is why retheming no longer needs the card re-prepped. The night
+    // which is why retheming no longer needs the card re-prepped. The dark
     // values are exactly what tiles used to bake, so nothing shifts.
     lv_color_t preview_dish;
     lv_color_t preview_ring;
     lv_color_t preview_sand;
 } theme_colors_t;
 
-// Active palette (night by default; theme_set_dark(false) switches to day)
+// Active palette. The default is a PANEL property, not a preference:
+// settings.c gives the 7 dark and the 5B light (the 5B flickers in
+// mid-greys at 24 Hz). theme_set_dark(false) switches to the light one.
 extern theme_colors_t th;
 
 void theme_init(void);

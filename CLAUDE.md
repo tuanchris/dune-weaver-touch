@@ -90,8 +90,10 @@ doubt, read the QML source — do not invent behavior.
 - The 7 runs 800x480 @ 16 MHz with 8/8/4 porches both axes: 820 x 500 =
   410,000 clocks/frame, so **~39 Hz**, versus the 5B's 24 Hz. Its
   frame-inversion beat is ~19.5 Hz, clear of the 8-15 Hz band that forces the
-  light theme on the 5B, so the dark theme is probably fine there — but that
-  is arithmetic. Confirm with `-DUI_DEBUG_FLAT_FIELD` before relying on it.
+  light theme on the 5B. **Confirmed on hardware 2026-08-29: the 7 does not
+  flicker.** So the flicker constraint is a 5B property, not a family one —
+  `settings.c` defaults the 7 to DARK and the 5B to light, and the theme
+  default is a panel fact rather than a preference. Do not "unify" them.
 - **Do not leave a serial reader attached to the native USB port.** On
   USB-Serial-JTAG the download-boot request travels over USB itself, so
   macOS's DTR/RTS pattern when a host OPENS the CDC port resets the chip into

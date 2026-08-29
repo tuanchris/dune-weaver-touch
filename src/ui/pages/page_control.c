@@ -1312,7 +1312,7 @@ static void sleep_chip_clicked(lv_event_t *e)
     // increment (board_backlight + first-touch swallow hook).
 }
 
-static void night_mode_toggled(lv_event_t *e)
+static void dark_mode_toggled(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target_obj(e);
     settings_get()->dark_mode = lv_obj_has_state(sw, LV_STATE_CHECKED);
@@ -1386,15 +1386,15 @@ static void build_screen_card(lv_obj_t *column)
 
     make_divider(card);
 
-    lv_obj_t *night_row = make_hrow(card);
-    lv_obj_t *night_label = lv_label_create(night_row);
-    lv_label_set_text(night_label, "Night mode");
-    lv_obj_set_flex_grow(night_label, 1);
-    lv_obj_set_style_text_font(night_label, TH_FONT_BODY, 0);
-    lv_obj_set_style_text_color(night_label, th.text, 0);
+    lv_obj_t *dark_row = make_hrow(card);
+    lv_obj_t *dark_label = lv_label_create(dark_row);
+    lv_label_set_text(dark_label, "Dark mode");
+    lv_obj_set_flex_grow(dark_label, 1);
+    lv_obj_set_style_text_font(dark_label, TH_FONT_BODY, 0);
+    lv_obj_set_style_text_color(dark_label, th.text, 0);
 
-    lv_obj_t *sw = make_dw_switch(night_row, settings_get()->dark_mode);
-    lv_obj_add_event_cb(sw, night_mode_toggled, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *sw = make_dw_switch(dark_row, settings_get()->dark_mode);
+    lv_obj_add_event_cb(sw, dark_mode_toggled, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 // ---------------------------------------------------------------------------

@@ -22,9 +22,9 @@
 // 820 x 500 = 410,000 clocks/frame, so 16 MHz is ~39 Hz — against the 5B's
 // 24 Hz below. A frame-inverted panel beats at half the refresh, which puts
 // this one near 19.5 Hz, clear of the 8-15 Hz band that makes the 5B flicker
-// in mid-greys. So the light-theme constraint that the 5B forces is most
-// likely NOT needed here — but that is arithmetic, not a measurement. Check
-// with -DUI_DEBUG_FLAT_FIELD on hardware before trusting the dark theme.
+// in mid-greys. CONFIRMED on hardware 2026-08-29: no flicker at 39 Hz, so the
+// light-theme constraint the 5B forces does NOT apply here — settings.c
+// therefore defaults this board to the dark theme.
 // Peak framebuffer DMA is lower too (16 MHz x 2 B = 32 MB/s vs 42) and the
 // framebuffer smaller (768 KB vs 1.2 MB), so the sustained-PSRAM-bandwidth
 // ceiling that blocked every 5B fix is further away here.
