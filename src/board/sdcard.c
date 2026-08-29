@@ -50,11 +50,17 @@ esp_err_t sdcard_mount(void)
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SD_SPI_HOST;
-    // 40 MHz instead of the 20 MHz default. SPI-mode data blocks carry a
-    // CRC16 the driver verifies, so if the wiring can't hold this the failure
-    // is a loud read error (missing previews), not silent garbage — drop back
-    // to SDMMC_FREQ_DEFAULT if tiles start failing.
-    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+    // 20 MHz, NOT SDMMC_FREQ_HIGHSPEED (40). Measured 2026-08-28: at 40 MHz a
+    // 32 GB card fails the high-speed switch itself —
+    //   sdmmc_enable_hs_mode_and_check: send_csd returned 0x108
+    //   sdmmc_card_init failed (0x108)  -> no TF card mounted
+    // — while the SAME card at 20 MHz mounts cleanly and reads fine. A second
+    // card tolerated 40. So HIGHSPEED works on some cards and hard-fails the
+    // MOUNT on others, which is not a trade worth making for read speed on a
+    // device whose cards are chosen by the user. SPI-mode data blocks carry a
+    // CRC16 the driver verifies, so a marginal bus shows up as a loud read
+    // error (missing previews), never as silent garbage.
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.host_id = SD_SPI_HOST;

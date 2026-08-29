@@ -201,6 +201,32 @@ doubt, read the QML source — do not invent behavior.
   (see `screen_sleep.c` — that is real and it is what the repolarize flip is
   for). PWM dimming would need CTRL cut from EXIO2 and wired to GPIO6, the
   only unallocated pin in Waveshare's own GPIO table and not broken out.
+- **A card that will not mount is usually the HOST, not the card.** Two
+  independent causes, both hit on 2026-08-28 with a 32 GB card that a second
+  card did not reproduce:
+  1. `cmd=52 ... command CRC error` -> `sdmmc_io_reset: unexpected return:
+     0x109` -> `no TF card mounted (ESP_ERR_INVALID_CRC)`. An ESP-IDF bug
+     (espressif/esp-idf#14000): the SD spec wants CRC OFF in SPI mode outside
+     CMD0/CMD8, but IDF turns it ON during init (`sdmmc_send_cmd_crc_on_off`)
+     and the card KEEPS that state across a reset, because a soft reset does
+     not cut card power. Fixed upstream by tolerating the error; present in
+     v5.3+/v5.4/v5.5.1/v5.5.2 but NOT 5.5.0. **Product impact: any reboot that
+     does not power-cycle the card can lose it — the OTA reboot included.**
+     platformio.ini pins framework-espidf 3.50502.0 (IDF 5.5.2) for this, with
+     `tools/patch_idf_sdmmc.py` as a no-op safety net on older frameworks.
+  2. `sdmmc_enable_hs_mode_and_check: send_csd returned 0x108` ->
+     `sdmmc_card_init failed (0x108)`. The HIGH-SPEED switch itself. Some
+     cards cannot do 40 MHz in SPI mode and fail the MOUNT, not just reads —
+     so `sdcard.c` uses `SDMMC_FREQ_DEFAULT` (20 MHz), not
+     `SDMMC_FREQ_HIGHSPEED`. Do not "optimise" it back without testing more
+     than one card.
+  What is NOT the cause: the filesystem, the partition map, and the card's
+  contents. Init aborts before CMD0, so no sector is ever read — verified by
+  reformatting to clean FAT32/MBR with 1232/1232 tiles resolving and getting a
+  byte-identical failure. Do not reformat, and do not blame the card first.
+  (Open question: at 20 MHz CMD52 answers "command not supported" rather than
+  a CRC error, so cause 1 may itself be speed-induced. The IDF bump is kept
+  regardless — the soft-reboot bug is real and independent.)
 - **A populated Browse does not mean the card mounted.** The pattern LIST comes
   from the table over HTTP (`page_browse: loaded N patterns (table)`); only the
   preview tiles come off the card. Card missing = full list, every dish a
