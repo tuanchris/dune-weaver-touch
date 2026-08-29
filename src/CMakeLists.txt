@@ -13,10 +13,17 @@ idf_component_register(
         "app/sd_catalog.c"
         "app/state.c"
         "render/thr_preview.c"
+        # Both type scales: 18/21/26/36 for the 5B, 12/14/17/24 for the 7.
+        # theme.h references one set per board and --gc-sections drops the
+        # other, so listing both costs nothing in the image.
         "ui/fonts/outfit_18.c"
         "ui/fonts/outfit_21.c"
         "ui/fonts/outfit_sb_26.c"
         "ui/fonts/outfit_sb_36.c"
+        "ui/fonts/outfit_12.c"
+        "ui/fonts/outfit_14.c"
+        "ui/fonts/outfit_sb_17.c"
+        "ui/fonts/outfit_sb_24.c"
         "ui/screen_sleep.c"
         "ui/theme.c"
         "ui/ui.c"

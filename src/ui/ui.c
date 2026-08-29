@@ -322,8 +322,8 @@ lv_obj_t *ui_page_root(lv_obj_t *parent)
 // the reference's refreshSerialPorts() before popup.open().
 
 #define TBL_MAX 8
-#define TBL_ROW_H 84    // 1.5x the reference's 56, like every other token
-#define TBL_POPUP_W 450 // 1.5x its 300
+#define TBL_ROW_H TH_S(56)     // the reference's row height, per panel
+#define TBL_POPUP_W TH_S(300)  // ConnectionStatus.qml width: 300
 // Four rows. The card sits at y=72 and must clear the nav bar (600 -
 // TH_NAV_HEIGHT = 536): 72 + 36 pad + ~24 label + 12 gap + 372 = ~516. Any
 // taller and the last row hides behind the nav; more than four gets a stepper.
@@ -928,7 +928,7 @@ void ui_show_error(const char *msg)
     lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);  // swallow taps behind the dialog
 
     lv_obj_t *card = plain(scrim);
-    lv_obj_set_width(card, 570);
+    lv_obj_set_width(card, TH_S(380));  // main.qml width: 380
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, th.surface, 0);
@@ -948,7 +948,7 @@ void ui_show_error(const char *msg)
     lv_obj_set_style_text_color(text, th.text, 0);
 
     lv_obj_t *ok = ui_pill_button(card, "OK", th.accent, true);
-    lv_obj_set_width(ok, 180);
+    lv_obj_set_width(ok, TH_S(120));  // main.qml width: 120
     lv_obj_add_event_cb(ok, error_ok_clicked, LV_EVENT_CLICKED, scrim);
 }
 

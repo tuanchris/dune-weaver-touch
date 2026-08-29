@@ -33,7 +33,15 @@ gen() { # <size> <weight-file> <out-name>
     echo "generated $OUT/$3.c"
 }
 
+# Two type scales, one per board (theme.h picks by -DBOARD_WAVESHARE_7):
+#   5B  1024x600 @ 237 PPI -> QML 12/14/17/24 x1.5 = 18/21/26/36
+#   7    800x480 @ 133 PPI -> the QML sizes as-is (that panel IS the QML target)
 gen 18 Outfit-Regular.ttf outfit_18
 gen 21 Outfit-Regular.ttf outfit_21
 gen 26 Outfit-SemiBold.ttf outfit_sb_26
 gen 36 Outfit-SemiBold.ttf outfit_sb_36
+
+gen 12 Outfit-Regular.ttf outfit_12
+gen 14 Outfit-Regular.ttf outfit_14
+gen 17 Outfit-SemiBold.ttf outfit_sb_17
+gen 24 Outfit-SemiBold.ttf outfit_sb_24

@@ -19,7 +19,16 @@
 static const char *TAG = "now_playing";
 
 // One preview size app-wide keeps the LittleFS cache coherent (thr_preview.h).
+// The disc image's DISPLAYED size (thr_preview resamples the 300 px master
+// to it). 300 on the 5B is the master size exactly, so that one blits 1:1.
+#if defined(BOARD_WAVESHARE_7)
+#define PREVIEW_SIZE_PX 200
+#else
 #define PREVIEW_SIZE_PX 300
+#endif
+// Dish/arc stack. 340 on the 5B, as before; the dish is inset by the card
+// radius, which is itself per-panel.
+#define NP_STACK_PX TH_S(227)
 
 // Montserrat stand-in fonts lack U+00B7 (·); U+2022 (•) is bundled. Swap for
 // "\xC2\xB7" once the Outfit fonts are converted with the middle dot included.
@@ -569,11 +578,11 @@ lv_obj_t *page_now_playing_create(lv_obj_t *parent)
     // cardinal point, so it read as four disconnected segments (photo from
     // Tuan, 2026-08-26). Do not re-parent these to the arc.
     lv_obj_t *stack = plain(left);
-    lv_obj_set_size(stack, 340, 340);
+    lv_obj_set_size(stack, NP_STACK_PX, NP_STACK_PX);
 
     // Resting dish while idle / while the preview renders
     lv_obj_t *dish = plain(stack);
-    lv_obj_set_size(dish, 340 - 2 * 21, 340 - 2 * 21);
+    lv_obj_set_size(dish, NP_STACK_PX - 2 * TH_RADIUS_MD, NP_STACK_PX - 2 * TH_RADIUS_MD);
     lv_obj_center(dish);
     lv_obj_set_style_radius(dish, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(dish, th.surface, 0);
@@ -595,7 +604,7 @@ lv_obj_t *page_now_playing_create(lv_obj_t *parent)
     lv_obj_add_flag(s_disc_img, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *arc = lv_arc_create(stack);
-    lv_obj_set_size(arc, 340, 340);
+    lv_obj_set_size(arc, NP_STACK_PX, NP_STACK_PX);
     lv_obj_center(arc);
     lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, 0);  // the disc shows through
     lv_arc_set_rotation(arc, 270);

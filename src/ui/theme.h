@@ -1,14 +1,56 @@
 // Design tokens ported from dune-weaver-touch/qml/components/ThemeManager.qml
 // ("the table at night": warm basalt ground, bone text, one amber accent).
 //
-// The QML app targets 800x480 at ~133 PPI; this 5" 1024x600 panel is ~237 PPI,
-// so physical dimensions carry a 1.5x scale over the QML pixel values.
+// The QML app targets 800x480 at ~133 PPI. The 5B's 5" 1024x600 panel is
+// ~237 PPI, so spacing, radii and type carry a 1.5x scale over the QML pixel
+// values there. The 7" board's panel IS 800x480 at ~133 PPI — the QML app's
+// own target — so it takes those values verbatim, and the reference app is
+// the authority for them rather than any division by 1.5.
+//
+// Note headerHeight/navHeight were never scaled: QML's 60/64 are what both
+// panels use, which is why they sit outside the variant block below.
 #pragma once
 
 #include <stdbool.h>
 
 #include "lvgl.h"
 
+#if defined(BOARD_WAVESHARE_7)
+
+// ---- 7" 800x480 @ ~133 PPI: the QML values verbatim ------------------------
+// Spacing
+#define TH_SPACE_XS 4
+#define TH_SPACE_SM 8
+#define TH_SPACE_MD 12
+#define TH_SPACE_LG 16
+#define TH_SPACE_XL 24
+
+// Radii
+#define TH_RADIUS_SM 10
+#define TH_RADIUS_MD 14
+
+// Hit targets / chrome
+#define TH_TOUCH_TARGET 48
+#define TH_CONTROL_HEIGHT 56
+// No QML counterpart (the on-screen keyboard is firmware-only, for the WiFi
+// password): four rows of TH_TOUCH_TARGET, leaving 228 px of content above.
+#define TH_KEYBOARD_HEIGHT 192
+
+// Type scale: the QML sizes themselves. Same merged Outfit + Material Icons
+// Round + FontAwesome build as the 5B set. Regenerate: tools/gen_fonts.sh
+LV_FONT_DECLARE(outfit_12)
+LV_FONT_DECLARE(outfit_14)
+LV_FONT_DECLARE(outfit_sb_17)
+LV_FONT_DECLARE(outfit_sb_24)
+#define TH_FONT_EYEBROW (&outfit_12)
+#define TH_FONT_CAPTION (&outfit_12)
+#define TH_FONT_BODY (&outfit_14)
+#define TH_FONT_TITLE (&outfit_sb_17)
+#define TH_FONT_DISPLAY (&outfit_sb_24)
+
+#else
+
+// ---- 5B 1024x600 @ ~237 PPI: QML values x1.5 (default) ---------------------
 // Spacing (QML value x 1.5)
 #define TH_SPACE_XS 6
 #define TH_SPACE_SM 12
@@ -19,13 +61,10 @@
 // Radii
 #define TH_RADIUS_SM 15
 #define TH_RADIUS_MD 21
-#define TH_RADIUS_PILL LV_RADIUS_CIRCLE
 
 // Hit targets / chrome
 #define TH_TOUCH_TARGET 72
 #define TH_CONTROL_HEIGHT 84
-#define TH_HEADER_HEIGHT 60
-#define TH_NAV_HEIGHT 64
 #define TH_KEYBOARD_HEIGHT 280
 
 // Type scale (QML 12/14/17/24 x 1.5): Outfit Regular/SemiBold merged with the
@@ -40,6 +79,47 @@ LV_FONT_DECLARE(outfit_sb_36)
 #define TH_FONT_BODY (&outfit_21)
 #define TH_FONT_TITLE (&outfit_sb_26)
 #define TH_FONT_DISPLAY (&outfit_sb_36)
+
+#endif  // BOARD_WAVESHARE_7
+
+// PIXELS ARE NOT SQUARE on the 7" panel. Its standard 800x480 active area is
+// 154.08 x 85.92 mm (diagonal 176.4 mm = 6.95", which checks out), so a pixel
+// is 0.1926 mm across and 0.179 mm down — 7.6% wider than tall. Anything
+// square in PIXELS reads as a horizontal ellipse on the GLASS; confirmed by
+// eye 2026-08-28 ("the circles look a bit stretched"). Shapes that must read
+// round are drawn narrower in x by this ratio.
+//
+// The 5B is ~108 x 64.8 mm over 1024x600: 2.3% taller than wide, the opposite
+// error and never noticed, so it is left at 1000 deliberately rather than
+// moving every circle on an already-validated board.
+//
+// Waveshare publishes no active area, so 1076 is inferred from the standard
+// part — it is the ONE number to change if a panel measures otherwise. The
+// sim CANNOT show this: SDL pixels are square, so a corrected circle looks
+// like an ellipse there and only hardware confirms it.
+#if defined(BOARD_WAVESHARE_7)
+#define TH_PX_ASPECT_X1000 1076
+#else
+#define TH_PX_ASPECT_X1000 1000
+#endif
+
+// Width in px that renders as wide as `h_px` is tall. Use for circles/squares.
+#define TH_SQUARE_W(h_px) \
+    (((h_px) * 1000 + TH_PX_ASPECT_X1000 / 2) / TH_PX_ASPECT_X1000)
+
+// One-off sizes that the token scale does not cover: write them as the QML
+// pixel value and let TH_S() place them on this panel. Integer math is exact
+// for every value in use, so the 5B keeps the literals it had.
+#if defined(BOARD_WAVESHARE_7)
+#define TH_S(qml_px) (qml_px)
+#else
+#define TH_S(qml_px) ((qml_px) * 3 / 2)
+#endif
+
+// Same on both panels: QML's radiusPill, headerHeight and navHeight.
+#define TH_RADIUS_PILL LV_RADIUS_CIRCLE
+#define TH_HEADER_HEIGHT 60
+#define TH_NAV_HEIGHT 64
 
 // Material Icons Round glyphs (UTF-8 for the PORTING_NOTES §7 subset).
 #define TH_ICON_ADD "\xEE\x85\x85"            // U+E145

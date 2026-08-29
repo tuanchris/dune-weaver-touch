@@ -35,7 +35,7 @@ static const char *TAG = "page_browse";
 // rows is what fits: 600 - 72 header - 72 nav = 456 px, which after the
 // grid's padding, the card's own padding and the name label leaves a 160 px
 // preview. The Up/Down pager is a column down the right of the grid, so the
-// cards get 1024 - PAGER_W of width to share.
+// cards get H_RES - PAGER_W of width to share.
 #define PAGE_COLS 4
 // The card row is CENTRED ON THE SCREEN: the pager column on the right is
 // mirrored by an empty band of the same width on the left, so the grid
@@ -54,18 +54,48 @@ static const char *TAG = "page_browse";
 //
 // Changing CARD_PREVIEW_PX no longer touches the SD card: tiles are resampled
 // from the one 300 px mask (PORTING_NOTES §7a), so this is a pure UI decision.
+#if defined(BOARD_WAVESHARE_7)
+// 7" 800x480. Same derivation, re-run against the smaller budget and the x1.0
+// tokens (GRID_GAP 8, GRID_PAD_HOR 12, GRID_PAD_VER 4):
+//
+//   horizontal: 4*CARD_W + 3*GRID_GAP <= 800 - 2*PAGER_W - 2*GRID_PAD_HOR
+//               4*134  + 3*8  = 560   <= 800 - 112 - 24 = 664  (104 spare)
+//   vertical:   2*CARD_H + GRID_GAP   <= 480 - HEADER - NAV - 2*GRID_PAD_VER
+//               2*163  + 8   = 334    <= 480 - 60 - 64 - 8 = 348 (14 spare)
+//   card:       CARD_W = 2*CARD_PAD + TH_SQUARE_W(PREVIEW) = 8 + 126 = 134
+//               CARD_H = 2*CARD_PAD + PREVIEW + CARD_GAP + caption(16) = 163
+//
+// Height is the binding axis here (the 5B's was width), so the preview is
+// pinned by the 2-row budget, not by the pager column. That is also why the
+// pixel-aspect correction takes its 7.6% out of the WIDTH (TH_SQUARE_W, see
+// theme.h): width had 64 px spare, height had 14. The preview is 126x136 px,
+// which is square on the glass — do not "fix" it back to 136x136.
+#define PAGER_W 56
+#define CARD_W (2 * CARD_PAD + TH_SQUARE_W(CARD_PREVIEW_PX))  // 4+4+126 = 134
+#define CARD_H 163
+#define CARD_PREVIEW_PX 136
+#define CARD_PAD 4
+#define CARD_GAP 3
+#else
 #define PAGER_W 84
 #define CARD_W 194
 #define CARD_H 220
 #define CARD_PREVIEW_PX 182
 #define CARD_PAD 6
 #define CARD_GAP 4
+#endif
 // One gap constant for both grid axes: page_size_now() measures rows with it,
 // so a mismatch between it and pad_row silently miscounts the page.
 #define GRID_GAP TH_SPACE_SM
 #define GRID_PAD_HOR TH_SPACE_MD
 #define GRID_PAD_VER TH_SPACE_XS
+#if defined(BOARD_WAVESHARE_7)
+// 480 would not fit a 480-tall panel. 300 also lands exactly on the master
+// size below, so the detail overlay blits 1:1 with no resample at all.
+#define DETAIL_PREVIEW_PX 300
+#else
 #define DETAIL_PREVIEW_PX 480
+#endif
 // Cards request tiles at CARD_PREVIEW_PX so the grid blits 1:1 — stretching
 // the 300 px master through a draw-time transform on every visible card made
 // scrolling crawl. The detail overlay keeps the 300 master (one static image;
@@ -290,7 +320,7 @@ static void make_card(int idx)
     // Child 0: circular preview slot (card-color placeholder dish until the
     // card's tile arrives via the lazy loader)
     lv_obj_t *slot = plain(card);
-    lv_obj_set_size(slot, CARD_PREVIEW_PX, CARD_PREVIEW_PX);
+    lv_obj_set_size(slot, TH_SQUARE_W(CARD_PREVIEW_PX), CARD_PREVIEW_PX);
     lv_obj_set_style_radius(slot, LV_RADIUS_CIRCLE, 0);
     // No clip_corner: the tile paints its own corners in th.surface, so it
     // already reads as a circle. Clipping would push every visible card
@@ -497,7 +527,7 @@ static void attach_tiles(preview_ctx_t *ctx, const lv_image_dsc_t **dsc,
                 lv_obj_set_style_bg_opa(slot, LV_OPA_TRANSP, 0);
                 lv_obj_set_style_border_width(slot, 0, 0);
                 lv_obj_t *img = lv_image_create(slot);
-                lv_obj_set_size(img, CARD_PREVIEW_PX, CARD_PREVIEW_PX);
+                lv_obj_set_size(img, TH_SQUARE_W(CARD_PREVIEW_PX), CARD_PREVIEW_PX);
                 lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
                 lv_image_set_src(img, dsc[i]);
                 lv_obj_set_user_data(img, (void *)dsc[i]);  // released on rebuild
@@ -528,7 +558,7 @@ static void attach_detail(preview_ctx_t *ctx, const lv_image_dsc_t *dsc, esp_err
             lv_obj_set_style_bg_opa(s_detail_slot, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(s_detail_slot, 0, 0);
             lv_obj_t *img = lv_image_create(s_detail_slot);
-            lv_obj_set_size(img, DETAIL_PREVIEW_PX, DETAIL_PREVIEW_PX);
+            lv_obj_set_size(img, TH_SQUARE_W(DETAIL_PREVIEW_PX), DETAIL_PREVIEW_PX);
             lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
             lv_image_set_src(img, dsc);
             lv_obj_set_user_data(img, (void *)dsc);  // released on close
@@ -1344,7 +1374,7 @@ static void open_detail(int idx, lv_obj_t *card)
     lv_obj_set_flex_align(left, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     s_detail_slot = plain(left);
-    lv_obj_set_size(s_detail_slot, DETAIL_PREVIEW_PX, DETAIL_PREVIEW_PX);
+    lv_obj_set_size(s_detail_slot, TH_SQUARE_W(DETAIL_PREVIEW_PX), DETAIL_PREVIEW_PX);
     lv_obj_set_style_radius(s_detail_slot, LV_RADIUS_CIRCLE, 0);
     // No clip_corner — the tile's own corners are painted th.bg (see make_card)
     lv_obj_set_flex_flow(s_detail_slot, LV_FLEX_FLOW_COLUMN);

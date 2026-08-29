@@ -1,7 +1,11 @@
 # dune-weaver-touch (ESP32-S3)
 
-LVGL firmware for the Waveshare ESP32-S3-Touch-LCD-5B that reimplements the
+LVGL firmware for the Waveshare ESP32-S3-Touch-LCD boards that reimplements the
 PySide6/QML touch app at `/Volumes/SSD/projects/dune-weaver-pi/dune-weaver-touch`.
+Two panel variants build from this tree: the **5B** (5", 1024x600, default) and
+the **7** (7", 800x480, `-DBOARD_WAVESHARE_7`). They are the same base design —
+identical GPIO map and CH422G sequences — so the split is nine `#define`s in
+`board.h`, not a second board file. See "Board variants" below.
 Read `STATE.md` first for the current status, validation state, and backlog.
 That app is the reference for every feature, label, and behavior; `docs/PORTING_NOTES.md`
 holds the distilled contract (firmware HTTP API, page specs, constants). When in
@@ -9,7 +13,13 @@ doubt, read the QML source — do not invent behavior.
 
 ## Commands
 
-- Build: `pio run` · Flash: `pio run -t upload` · Monitor: `pio device monitor`
+- **The `waveshare-5b` env carries `-DUI_DEBUG_RGB_STOP` by default** (standing
+  practice, Tuan 2026-08-28): the panel is held in LCD_RST while asleep, which
+  is the live experiment against the white-halo artifact. It is in
+  `platformio.ini` rather than a flag to remember, so every 5B flash gets it.
+  Remove that line once the halo question is settled.
+- Build: `pio run -e waveshare-5b` (or `-e waveshare-7`) · Flash: add `-t upload`
+  · Monitor: `pio device monitor -e <env>`. Bare `pio run` builds BOTH envs.
 - OTA (same contract as dune-weaver-firmware, `src/net/ota.c`): the panel RUNS
   an HTTP server and takes a PUSHED image — it never pulls, which is what keeps
   TLS and its internal-RAM cost off the device.
@@ -66,6 +76,67 @@ doubt, read the QML source — do not invent behavior.
   and exits; `python sim/check_tiles.py out.png` renders the dumps. Use it on
   any card-format change — the 300 px path (Now Playing, Browse detail) is
   otherwise only reachable by tapping, so it silently goes unverified.
+
+## Board variants
+
+- `pio run -e waveshare-5b` (1024x600) and `-e waveshare-7` (800x480). The
+  variant is one flag, `-DBOARD_WAVESHARE_7`, consumed only by `board.h`; the
+  sim takes the same switch as `cmake -S sim -B sim/build -DDWT_BOARD=7`.
+- **Everything except resolution and RGB timings is identical** — RGB bus
+  GPIOs, I2C 8/9, TP_IRQ 4, GT911, CH422G addresses and EXIO sequences, 16MB
+  quad flash, 8MB octal PSRAM. Verified against Waveshare's own demos
+  (`08_lvgl_Porting` for the 5B, `09_lvgl_v9_demo` for the 7). Do not
+  re-derive the pin map per board; there is only one.
+- The 7 runs 800x480 @ 16 MHz with 8/8/4 porches both axes: 820 x 500 =
+  410,000 clocks/frame, so **~39 Hz**, versus the 5B's 24 Hz. Its
+  frame-inversion beat is ~19.5 Hz, clear of the 8-15 Hz band that forces the
+  light theme on the 5B, so the dark theme is probably fine there — but that
+  is arithmetic. Confirm with `-DUI_DEBUG_FLAT_FIELD` before relying on it.
+- **Do not leave a serial reader attached to the native USB port.** On
+  USB-Serial-JTAG the download-boot request travels over USB itself, so
+  macOS's DTR/RTS pattern when a host OPENS the CDC port resets the chip into
+  `DOWNLOAD(USB/UART0)`, where it parks at `waiting for download` and nothing
+  drives the panel. Symptom: a black screen and a boot log that only ever
+  shows the ROM banner. Proof it is the opening and not a stale buffer: each
+  open prints a different `Saved PC`. `pio device monitor` handles the
+  sequence properly and is the right tool; an ad-hoc pyserial listener is not,
+  and a reconnecting one keeps the board down for as long as it runs. To check
+  whether the app is actually alive, detach everything and look at the glass.
+- **The 7 has two USB-C ports and they behave differently.** The port
+  labelled `USB` is the S3's native USB (GPIO19/20, `303a:1001`); the one next
+  to the UART-select slide switch is a CH343 bridge (`1a86:55d3`) that the
+  wiki calls UART1. BOTH have flashed this board successfully (2026-08-28).
+  What actually bites is that the CH343 port's auto-reset can fail to enter
+  download mode at all — esptool then reports `No serial data received` on
+  every `--before` strategy and an EN pulse yields a zero-byte boot log, which
+  reads exactly like a dead board. Hold BOOT while plugging in to force the
+  ROM, or use the native-USB port, which has its own ROM download path.
+  Do not conclude from that failure that the UART port cannot flash; it can.
+- On the 7, **CH422G EXIO5 muxes GPIO19/20 between USB and the CAN
+  transceiver** (wiki: low = USB, high = CAN). `EXIO_RUN_DEFAULT` (0x1A)
+  leaves it low, which is what keeps the native-USB console alive — do not
+  set bit 5 in the run mask. Waveshare's own 7 demo writes 0x2C/0x2E, i.e.
+  bit 5 high, which is the likely reason a board running their factory
+  firmware never enumerates until BOOT is held. `EXIO_TP_RESET_LOW/HIGH`
+  (0x28/0x2A) still blip bit 5 high during the boot touch-reset; too brief to
+  drop enumeration in practice, but worth clearing when that code is touched.
+- **The UI scales per panel.** `theme.h` holds two token sets: the 5B's are
+  the QML values x1.5 (237 PPI), the 7's are the QML values verbatim, because
+  800x480 @ ~133 PPI IS the QML app's target — so read the reference app for
+  the 7's numbers rather than dividing the 5B's by 1.5. `headerHeight` 60 and
+  `navHeight` 64 were never scaled and are shared. Fonts come in both scales
+  (18/21/26/36 and 12/14/17/24); `src/CMakeLists.txt` lists all eight and
+  `--gc-sections` drops the unused set (measured: the 5B image moved 44 bytes,
+  not 250 KB).
+- For one-off sizes the token scale does not cover, write the QML pixel value
+  and wrap it in **`TH_S()`** (theme.h) rather than hardcoding. Integer math
+  reproduces every 5B literal exactly — `TH_S(56)`=84, `TH_S(300)`=450,
+  `TH_S(380)`=570, `TH_S(427)`=640, `TH_S(227)`=340 — so the 5B is bit-stable
+  while the 7 gets the reference value.
+- Browse re-derives its grid per panel (`page_browse.c`): the 7 is 4x2 at
+  CARD_W 144 / CARD_H 163 / preview 136, and **height is its binding axis**
+  where the 5B's was width. Detail preview is 300 there, which lands exactly
+  on the master tile size, so it blits 1:1.
 
 ## Hardware facts (verified against Waveshare wiki + demo, do not "fix")
 
@@ -130,6 +201,10 @@ doubt, read the QML source — do not invent behavior.
   (see `screen_sleep.c` — that is real and it is what the repolarize flip is
   for). PWM dimming would need CTRL cut from EXIO2 and wired to GPIO6, the
   only unallocated pin in Waveshare's own GPIO table and not broken out.
+- **A populated Browse does not mean the card mounted.** The pattern LIST comes
+  from the table over HTTP (`page_browse: loaded N patterns (table)`); only the
+  preview tiles come off the card. Card missing = full list, every dish a
+  placeholder. Check `TF card mounted at /sd: N MB` in the log, not the UI.
 - GT911 latches I2C address 0x5D only if INT (GPIO4) is held low through reset —
   that's why `board_init()` drives GPIO4 as an output during the reset dance.
 

@@ -5,6 +5,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(dwt_sim C)
 
+# Panel variant, matching the PlatformIO envs. "7" compiles the UI with the
+# 7" board's 800x480 geometry so the layout can be worked on without hardware:
+#   cmake -S sim -B sim/build -DDWT_BOARD=7
+set(DWT_BOARD "5b" CACHE STRING "Panel variant: 5b (1024x600) or 7 (800x480)")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -18,11 +23,11 @@ find_library(SDL2_LIB SDL2 PATHS /opt/homebrew/lib /usr/local/lib REQUIRED)
 
 file(GLOB_RECURSE LVGL_SRC ${LVGL_DIR}/src/*.c)
 file(GLOB PAGE_SRC ${REPO}/src/ui/pages/*.c)
+# Both type scales (5B x1.5 and 7 x1.0); theme.h references one set,
+# the linker drops the other. Globbed so a new size needs no edit here.
+file(GLOB FONT_SRC ${REPO}/src/ui/fonts/*.c)
 set(DEVICE_SRC
-    ${REPO}/src/ui/fonts/outfit_18.c
-    ${REPO}/src/ui/fonts/outfit_21.c
-    ${REPO}/src/ui/fonts/outfit_sb_26.c
-    ${REPO}/src/ui/fonts/outfit_sb_36.c
+    ${FONT_SRC}
     ${REPO}/src/ui/screen_sleep.c
     ${REPO}/src/ui/theme.c
     ${REPO}/src/ui/ui.c
@@ -55,6 +60,11 @@ target_include_directories(dwt_sim PRIVATE
     ${REPO}/src                         # ui/, app/, net/, render/
     /opt/homebrew/include               # SDL2/
 )
+
+if(DWT_BOARD STREQUAL "7")
+    target_compile_definitions(dwt_sim PRIVATE BOARD_WAVESHARE_7)
+    message(STATUS "dwt_sim: 7\" panel variant (800x480)")
+endif()
 
 target_compile_definitions(dwt_sim PRIVATE
     LV_CONF_INCLUDE_SIMPLE

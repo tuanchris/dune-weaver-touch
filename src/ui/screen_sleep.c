@@ -13,6 +13,19 @@
 // provide. The sim links a logging stub for this symbol instead.
 extern esp_err_t board_backlight(bool on);
 
+#ifdef UI_DEBUG_RGB_STOP
+// PROTOTYPE — panel reset while asleep, to test whether "undriven" clears
+// retention the way pulling power does. There is no public IDF call to halt the
+// RGB timing (lcd_ll_stop is internal, and disp_on_off is a no-op here because
+// disp_gpio_num is -1), so this uses the panel's own reset line instead, which
+// is the thing that actually matters: with LCD_RST asserted the panel's timing
+// controller and drivers are held off and the LC sees nothing, whatever the ESP
+// keeps clocking at it. Unmeasured; the panel may or may not resume cleanly.
+extern esp_err_t board_lcd_reset(bool asserted);
+#define PANEL_REST_AFTER_S 30
+static bool s_panel_in_reset;
+#endif
+
 static const char *TAG = "screen_sleep";
 
 #define CHECK_PERIOD_MS 1000
@@ -27,6 +40,15 @@ static const char *TAG = "screen_sleep";
 // primary, plain at mid grey, flickering there, clearing only after hours
 // unpowered. Alternating the field cancels the bias instead of building it.
 #define REPOLARIZE_PERIOD_S 30
+
+// Do NOT replace this with "hold white for hours". That was tried 2026-08-27
+// on the theory that clearing needs sustained opposite drive, and the sources
+// say the opposite: Fannal names "high constant drive voltage" as the stressor
+// and recommends periodic pixel inversion and grey-scale cycling; BenQ
+// prescribes fast-moving varied content; Tech Briefs prescribes all-BLACK for
+// 4-6 h, i.e. the LOW-drive state. Nobody recommends parking on white, which on
+// a normally-black panel is maximum drive. Alternation is both the prevention
+// and the remedy the literature actually supports.
 
 // The field can be white for a whole REPOLARIZE_PERIOD_S and a wake tap can
 // land in the middle of it, so the panel stays dark until black is on the
@@ -61,6 +83,13 @@ static void shield_event(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_PRESSED) {
+#ifdef UI_DEBUG_RGB_STOP
+        if (s_panel_in_reset) {
+            board_lcd_reset(false);
+            s_panel_in_reset = false;
+            ESP_LOGI(TAG, "panel out of reset");
+        }
+#endif
         ESP_LOGI(TAG, "wake tap (field was %s)", s_shield_light ? "WHITE" : "black");
         lv_obj_set_style_bg_color(s_shield, lv_color_black(), 0);
         lv_obj_invalidate(s_shield);
@@ -82,6 +111,9 @@ static void sleep_now(void)
     s_asleep_s = 0;
     s_shield_light = false;
     s_wake_frames = 0;
+#ifdef UI_DEBUG_RGB_STOP
+    s_panel_in_reset = false;
+#endif
     s_shield = lv_obj_create(lv_layer_sys());
     lv_obj_remove_style_all(s_shield);
     lv_obj_set_size(s_shield, LV_PCT(100), LV_PCT(100));
@@ -99,7 +131,19 @@ static void check_timer(lv_timer_t *t)
 {
     (void)t;
     if (s_asleep) {
-        if (++s_asleep_s % REPOLARIZE_PERIOD_S == 0 && s_shield != NULL) {
+        s_asleep_s++;
+#ifdef UI_DEBUG_RGB_STOP
+        if (!s_panel_in_reset && s_asleep_s >= PANEL_REST_AFTER_S) {
+            s_panel_in_reset = true;
+            board_lcd_reset(true);
+            ESP_LOGI(TAG, "panel held in RESET after %us idle - LC undriven",
+                     (unsigned)s_asleep_s);
+        }
+        if (s_panel_in_reset) {
+            return;  // nothing to repaint: the panel is ignoring the pixel stream
+        }
+#endif
+        if (s_asleep_s % REPOLARIZE_PERIOD_S == 0 && s_shield != NULL) {
             s_shield_light = !s_shield_light;
             lv_obj_set_style_bg_color(
                 s_shield, s_shield_light ? lv_color_white() : lv_color_black(), 0);

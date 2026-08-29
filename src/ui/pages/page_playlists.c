@@ -1203,7 +1203,7 @@ static lv_obj_t *list_row_create(int idx)
 {
     lv_obj_t *row = plain(s_list_cont);
     lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, 114); // QML 76 x 1.5
+    lv_obj_set_height(row, TH_S(76));  // QML 76
     lv_obj_set_style_bg_color(row, th.surface, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(row, th.pressed, LV_STATE_PRESSED);

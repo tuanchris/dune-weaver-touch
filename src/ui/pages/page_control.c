@@ -565,7 +565,7 @@ static void open_join_modal(int idx)
     lv_obj_add_flag(s_join_scrim, LV_OBJ_FLAG_CLICKABLE);  // swallow background taps
 
     lv_obj_t *card = plain(s_join_scrim);
-    lv_obj_set_width(card, 640);
+    lv_obj_set_width(card, TH_S(427));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_align(card, LV_ALIGN_TOP_MID, 0, TH_SPACE_XL);
     lv_obj_set_style_bg_color(card, th.surface, 0);
@@ -1124,7 +1124,7 @@ static void autoplay_show_picker(const fw_str_list_t *list)
     lv_obj_add_event_cb(s_autoplay_popup, autoplay_popup_cancel, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *card = plain(s_autoplay_popup);
-    lv_obj_set_width(card, 510);
+    lv_obj_set_width(card, TH_S(340));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, th.surface, 0);
@@ -1153,9 +1153,9 @@ static void autoplay_show_picker(const fw_str_list_t *list)
         lv_obj_set_style_text_color(empty, th.text3, 0);
     }
 
-    int rows_h = list->count * (84 + TH_SPACE_SM);
-    if (rows_h > 340) {
-        rows_h = 340;
+    int rows_h = list->count * (TH_S(56) + TH_SPACE_SM);
+    if (rows_h > TH_S(227)) {
+        rows_h = TH_S(227);
     }
     lv_obj_t *rows_row = plain(card);
     lv_obj_set_size(rows_row, LV_PCT(100), rows_h);

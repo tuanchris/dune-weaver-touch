@@ -1,6 +1,12 @@
-// Waveshare ESP32-S3-Touch-LCD-5B board support (1024x600 variant).
-// Pin map and CH422G sequences verified against the Waveshare wiki and the
-// ESP32-S3-Touch-LCD-5 demo bundle (ESP-IDF/08_lvgl_Porting).
+// Waveshare ESP32-S3-Touch-LCD board support, for two panel variants:
+//   5B (1024x600, default) and 7 (800x480, -DBOARD_WAVESHARE_7).
+//
+// The two boards are the same base design. Every GPIO below — RGB bus, I2C,
+// touch IRQ — and the CH422G sequences are IDENTICAL between them; only the
+// resolution and RGB timings differ, which is why the split is a handful of
+// #defines and not a second board file. Verified against Waveshare's own
+// demos: ESP-IDF/08_lvgl_Porting (5B) and
+// ESP-IDF/09_lvgl_v9_demo/components/waveshare_rgb_lcd_port.[ch] (7).
 #pragma once
 
 #include <stdbool.h>
@@ -8,6 +14,33 @@
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 
+#if defined(BOARD_WAVESHARE_7)
+
+// ---- ESP32-S3-Touch-LCD-7: 800x480 ----------------------------------------
+// Waveshare's own values (09_lvgl_v9_demo/waveshare_rgb_lcd_port.[ch]).
+//
+// 820 x 500 = 410,000 clocks/frame, so 16 MHz is ~39 Hz — against the 5B's
+// 24 Hz below. A frame-inverted panel beats at half the refresh, which puts
+// this one near 19.5 Hz, clear of the 8-15 Hz band that makes the 5B flicker
+// in mid-greys. So the light-theme constraint that the 5B forces is most
+// likely NOT needed here — but that is arithmetic, not a measurement. Check
+// with -DUI_DEBUG_FLAT_FIELD on hardware before trusting the dark theme.
+// Peak framebuffer DMA is lower too (16 MHz x 2 B = 32 MB/s vs 42) and the
+// framebuffer smaller (768 KB vs 1.2 MB), so the sustained-PSRAM-bandwidth
+// ceiling that blocked every 5B fix is further away here.
+#define BOARD_LCD_H_RES 800
+#define BOARD_LCD_V_RES 480
+#define BOARD_LCD_PCLK_HZ (16 * 1000 * 1000)
+#define BOARD_LCD_HSYNC_BACK_PORCH 8
+#define BOARD_LCD_HSYNC_FRONT_PORCH 8
+#define BOARD_LCD_HSYNC_PULSE_WIDTH 4
+#define BOARD_LCD_VSYNC_BACK_PORCH 8
+#define BOARD_LCD_VSYNC_FRONT_PORCH 8
+#define BOARD_LCD_VSYNC_PULSE_WIDTH 4
+
+#else
+
+// ---- ESP32-S3-Touch-LCD-5B: 1024x600 (default) -----------------------------
 #define BOARD_LCD_H_RES 1024
 #define BOARD_LCD_V_RES 600
 // 21 MHz, Waveshare's value. This IS the ceiling — measured 2026-08-27, do not
@@ -44,6 +77,8 @@
 #define BOARD_LCD_VSYNC_BACK_PORCH 23
 #define BOARD_LCD_VSYNC_FRONT_PORCH 12
 #define BOARD_LCD_VSYNC_PULSE_WIDTH 2
+
+#endif  // BOARD_WAVESHARE_7
 
 // RGB signal GPIOs
 #define BOARD_LCD_GPIO_VSYNC 3
@@ -82,6 +117,11 @@ esp_err_t board_init(void);
 // to 3V3 through R30, so this never stops the panel refreshing. Off at boot —
 // app_main lights it once the first frame exists.
 esp_err_t board_backlight(bool on);
+
+// Panel reset (CH422G EXIO3, active low) — see board.c. Asserted, the LC is
+// undriven; released, a dumb RGB panel resumes from the live pixel stream
+// with no re-init, since there is no register state to restore.
+esp_err_t board_lcd_reset(bool asserted);
 
 // TF-card chip select (CH422G EXIO4, active low). sdcard.c holds it selected
 // for the whole session; the sdspi driver is configured with no CS GPIO.

@@ -113,12 +113,23 @@ static int preview_selftest(const char *rel)
     return rc;
 }
 
+// Panel geometry, mirroring src/board/board.h (the sim does not compile
+// src/board/, so the two numbers are duplicated rather than included). Switch
+// with cmake -DDWT_BOARD=7.
+#if defined(BOARD_WAVESHARE_7)
+#define SIM_H_RES 800
+#define SIM_V_RES 480
+#else
+#define SIM_H_RES 1024
+#define SIM_V_RES 600
+#endif
+
 int main(void)
 {
     lv_init();
     lv_tick_set_cb(tick_cb);
 
-    lv_display_t *disp = lv_sdl_window_create(1024, 600);
+    lv_display_t *disp = lv_sdl_window_create(SIM_H_RES, SIM_V_RES);
     lv_sdl_window_set_title(disp, "dune-weaver-touch sim");
     const char *zoom = getenv("DWT_SIM_ZOOM");
     if (zoom != NULL) {

@@ -104,6 +104,18 @@ static esp_err_t exio_update(uint8_t set, uint8_t clear)
     return ch422g_set_exio(s_exio);
 }
 
+// Panel reset (EXIO3, active low). Asserting it holds the LCD's own timing
+// controller and its source/gate drivers in reset, so the liquid crystal sees
+// NO drive — the RGB peripheral keeps clocking pixels at a panel that ignores
+// them, harmlessly. This is the closest software equivalent of pulling power,
+// which is so far the only thing measured to clear retention on this panel:
+// actively scanning black is not the same as unpowered, because an imperfect
+// Vcom trim leaves a small DC offset on every frame.
+esp_err_t board_lcd_reset(bool asserted)
+{
+    return exio_update(asserted ? 0 : EXIO_BIT_LCD_RST, asserted ? EXIO_BIT_LCD_RST : 0);
+}
+
 esp_err_t board_backlight(bool on)
 {
     return exio_update(on ? EXIO_BIT_DISP : 0, on ? 0 : EXIO_BIT_DISP);
