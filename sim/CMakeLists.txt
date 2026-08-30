@@ -8,7 +8,7 @@ project(dwt_sim C)
 # Panel variant, matching the PlatformIO envs. "7" compiles the UI with the
 # 7" board's 800x480 geometry so the layout can be worked on without hardware:
 #   cmake -S sim -B sim/build -DDWT_BOARD=7
-set(DWT_BOARD "5b" CACHE STRING "Panel variant: 5b (1024x600) or 7 (800x480)")
+set(DWT_BOARD "5b" CACHE STRING "Panel variant: 5b (1024x600), 5 or 7 (800x480)")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -62,8 +62,13 @@ target_include_directories(dwt_sim PRIVATE
 )
 
 if(DWT_BOARD STREQUAL "7")
-    target_compile_definitions(dwt_sim PRIVATE BOARD_WAVESHARE_7)
-    message(STATUS "dwt_sim: 7\" panel variant (800x480)")
+    # 800x480 geometry AND the 7" glass's non-square pixels.
+    target_compile_definitions(dwt_sim PRIVATE BOARD_PANEL_800X480 BOARD_WAVESHARE_7)
+    message(STATUS "dwt_sim: 7\" panel variant (800x480, wide pixels)")
+elseif(DWT_BOARD STREQUAL "5")
+    # 800x480 geometry with square pixels (the 5, not the 5B).
+    target_compile_definitions(dwt_sim PRIVATE BOARD_PANEL_800X480)
+    message(STATUS "dwt_sim: 5\" 800x480 panel variant")
 endif()
 
 target_compile_definitions(dwt_sim PRIVATE

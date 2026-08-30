@@ -21,7 +21,7 @@ static const char *TAG = "now_playing";
 // One preview size app-wide keeps the LittleFS cache coherent (thr_preview.h).
 // The disc image's DISPLAYED size (thr_preview resamples the 300 px master
 // to it). 300 on the 5B is the master size exactly, so that one blits 1:1.
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 #define PREVIEW_SIZE_PX 200
 #else
 #define PREVIEW_SIZE_PX 300

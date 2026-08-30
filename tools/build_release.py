@@ -29,7 +29,16 @@ PIO = shutil.which("pio") or shutil.which("platformio") or "/opt/homebrew/bin/pi
 
 REPO = "https://github.com/tuanchris/dune-weaver-touch"
 
-ENV = "waveshare-5b"
+# The RELEASE env, deliberately not "waveshare-5b": that one carries
+# -DUI_DEBUG_RGB_STOP (the unmeasured sleep-panel-reset experiment) and must
+# never ship. See platformio.ini.
+ENV = "waveshare-5b-release"
+# Second image for the 800x480 boards (the 5 and the 7). ota.c fetches
+# firmware-800x480.bin on those, so a release without this would leave them
+# unable to update -- and a release that named it firmware.bin would flash a
+# 1024x600 build onto them.
+ENV_800X480 = "waveshare-7"
+IMAGE_800X480 = "firmware-800x480.bin"
 MCU = "esp32s3"
 BOARD_DESC = "Waveshare ESP32-S3-Touch-LCD-5B (16MB flash, 8MB PSRAM)"
 
@@ -120,6 +129,17 @@ for name, offset, src_name in IMAGES:
         "signature": {"algorithm": "SHA2-256", "value": sha256(dst)},
     }
     print("  %-14s %8s  %9d B" % (src_name, offset, os.path.getsize(dst)))
+
+# Build and stage the 800x480 image alongside. It is OTA-only: the web
+# installer manifest below stays 5B, so a 5/7 is installed over USB.
+print("\nBuilding the 800x480 OTA image (env: %s)\n" % ENV_800X480)
+run([PIO, "run", "-e", ENV_800X480])
+src_800 = os.path.join(".pio", "build", ENV_800X480, "firmware.bin")
+if not os.path.exists(src_800):
+    sys.exit("Missing build artifact: %s" % src_800)
+shutil.copyfile(src_800, os.path.join(rel_path, IMAGE_800X480))
+staged.append(IMAGE_800X480)
+print("  %-14s %8s  %9d B" % (IMAGE_800X480, "(ota)", os.path.getsize(src_800)))
 
 image_names = ["%s-%s" % (MCU, n) for n, _, _ in IMAGES]
 

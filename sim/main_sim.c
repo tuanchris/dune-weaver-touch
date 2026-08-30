@@ -116,7 +116,7 @@ static int preview_selftest(const char *rel)
 // Panel geometry, mirroring src/board/board.h (the sim does not compile
 // src/board/, so the two numbers are duplicated rather than included). Switch
 // with cmake -DDWT_BOARD=7.
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 #define SIM_H_RES 800
 #define SIM_V_RES 480
 #else

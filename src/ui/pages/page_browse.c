@@ -54,7 +54,7 @@ static const char *TAG = "page_browse";
 //
 // Changing CARD_PREVIEW_PX no longer touches the SD card: tiles are resampled
 // from the one 300 px mask (PORTING_NOTES §7a), so this is a pure UI decision.
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 // 7" 800x480. Same derivation, re-run against the smaller budget and the x1.0
 // tokens (GRID_GAP 8, GRID_PAD_HOR 12, GRID_PAD_VER 4):
 //
@@ -89,7 +89,7 @@ static const char *TAG = "page_browse";
 #define GRID_GAP TH_SPACE_SM
 #define GRID_PAD_HOR TH_SPACE_MD
 #define GRID_PAD_VER TH_SPACE_XS
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 // 480 would not fit a 480-tall panel. 300 also lands exactly on the master
 // size below, so the detail overlay blits 1:1 with no resample at all.
 #define DETAIL_PREVIEW_PX 300

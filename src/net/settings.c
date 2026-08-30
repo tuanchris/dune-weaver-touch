@@ -53,7 +53,7 @@ static void set_defaults(app_settings_t *s)
     // theme the design was built around.
     //
     // This is the default for a fresh NVS only; a stored choice always wins.
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
     s->dark_mode = true;
 #else
     s->dark_mode = false;

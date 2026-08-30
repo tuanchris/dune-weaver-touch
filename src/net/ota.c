@@ -23,7 +23,16 @@
 // second host would cost another handshake. releases/<tag>/ is committed by
 // .github/workflows/release.yml for this reason.
 #define GH_LATEST_URL "https://api.github.com/repos/tuanchris/dune-weaver-touch/releases/latest"
+// The image name is PER PANEL. Both boards are esp32s3 and nothing else in the
+// release tells them apart, so a single firmware.bin would let an 800x480 panel
+// pull a 1024x600 build and come up unreadable. firmware.bin stays the 5B's
+// name so panels already in the field keep updating. A release with no matching
+// image 404s, which fails the update cleanly rather than flashing the wrong one.
+#if defined(BOARD_PANEL_800X480)
+#define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-800x480.bin"
+#else
 #define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware.bin"
+#endif
 // GitHub rejects API requests without one.
 #define GH_USER_AGENT "dune-weaver-touch"
 

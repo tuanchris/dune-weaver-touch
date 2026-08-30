@@ -1,5 +1,7 @@
 // Waveshare ESP32-S3-Touch-LCD board support, for two panel variants:
-//   5B (1024x600, default) and 7 (800x480, -DBOARD_WAVESHARE_7).
+//   5B (1024x600, default) and the 5 / 7 (800x480,
+//   -DBOARD_PANEL_800X480). BOARD_WAVESHARE_7 is a separate axis: it says
+//   only that the glass has non-square pixels (theme.h), not its size.
 //
 // The two boards are the same base design. Every GPIO below — RGB bus, I2C,
 // touch IRQ — and the CH422G sequences are IDENTICAL between them; only the
@@ -14,7 +16,7 @@
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 
 // ---- ESP32-S3-Touch-LCD-7: 800x480 ----------------------------------------
 // Waveshare's own values (09_lvgl_v9_demo/waveshare_rgb_lcd_port.[ch]).
@@ -78,7 +80,7 @@
 #define BOARD_LCD_VSYNC_FRONT_PORCH 12
 #define BOARD_LCD_VSYNC_PULSE_WIDTH 2
 
-#endif  // BOARD_WAVESHARE_7
+#endif  // BOARD_PANEL_800X480
 
 // RGB signal GPIOs
 #define BOARD_LCD_GPIO_VSYNC 3

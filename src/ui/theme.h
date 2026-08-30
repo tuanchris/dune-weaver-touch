@@ -15,9 +15,9 @@
 
 #include "lvgl.h"
 
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 
-// ---- 7" 800x480 @ ~133 PPI: the QML values verbatim ------------------------
+// ---- 800x480 @ ~133 PPI: the QML values verbatim ------------------------
 // Spacing
 #define TH_SPACE_XS 4
 #define TH_SPACE_SM 8
@@ -80,7 +80,7 @@ LV_FONT_DECLARE(outfit_sb_36)
 #define TH_FONT_TITLE (&outfit_sb_26)
 #define TH_FONT_DISPLAY (&outfit_sb_36)
 
-#endif  // BOARD_WAVESHARE_7
+#endif  // BOARD_PANEL_800X480
 
 // PIXELS ARE NOT SQUARE on the 7" panel. Its standard 800x480 active area is
 // 154.08 x 85.92 mm (diagonal 176.4 mm = 6.95", which checks out), so a pixel
@@ -110,7 +110,7 @@ LV_FONT_DECLARE(outfit_sb_36)
 // One-off sizes that the token scale does not cover: write them as the QML
 // pixel value and let TH_S() place them on this panel. Integer math is exact
 // for every value in use, so the 5B keeps the literals it had.
-#if defined(BOARD_WAVESHARE_7)
+#if defined(BOARD_PANEL_800X480)
 #define TH_S(qml_px) (qml_px)
 #else
 #define TH_S(qml_px) ((qml_px) * 3 / 2)

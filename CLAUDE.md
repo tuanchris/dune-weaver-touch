@@ -13,11 +13,23 @@ doubt, read the QML source — do not invent behavior.
 
 ## Commands
 
-- **The `waveshare-5b` env carries `-DUI_DEBUG_RGB_STOP` by default** (standing
-  practice, Tuan 2026-08-28): the panel is held in LCD_RST while asleep, which
-  is the live experiment against the white-halo artifact. It is in
-  `platformio.ini` rather than a flag to remember, so every 5B flash gets it.
-  Remove that line once the halo question is settled.
+- **Four envs.** `waveshare-5b` (1024x600, and it carries
+  `-DUI_DEBUG_RGB_STOP` by default — standing practice per Tuan 2026-08-28, the
+  live white-halo experiment, so every bench flash of the 5B gets it);
+  `waveshare-5b-release` (the same board WITHOUT that flag — what
+  `tools/build_release.py` ships, because the prototype is unmeasured and must
+  not reach real panels); `waveshare-5` and `waveshare-7` (both 800x480).
+  Drop the flag and the extra env together once the halo question is settled.
+- **Two independent build axes.** `BOARD_PANEL_800X480` is geometry —
+  resolution, RGB timings, theme tokens, the Browse grid, the dark default.
+  `BOARD_WAVESHARE_7` says ONLY that the glass has non-square pixels. The 5 and
+  the 7 share the first; only the 7 sets the second. Do not re-merge them: a 5"
+  800x480 panel is ~0.135 mm square pixels and would be visibly over-corrected.
+- **Releases carry two images.** `firmware.bin` is the 5B (unchanged, so panels
+  in the field keep updating) and `firmware-800x480.bin` is the 5/7; `ota.c`
+  picks by `BOARD_PANEL_800X480`. Both boards are esp32s3 and nothing else
+  distinguishes them, so a single image would let an 800x480 panel flash a
+  1024x600 build. A missing image 404s, which fails safe.
 - Build: `pio run -e waveshare-5b` (or `-e waveshare-7`) · Flash: add `-t upload`
   · Monitor: `pio device monitor -e <env>`. Bare `pio run` builds BOTH envs.
 - OTA (same contract as dune-weaver-firmware, `src/net/ota.c`): the panel RUNS
