@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "board/board.c"
+        "board/board_crowpanel5.c"
         "board/display.c"
         "board/sdcard.c"
         "net/settings.c"

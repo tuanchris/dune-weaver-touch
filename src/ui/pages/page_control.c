@@ -69,6 +69,7 @@ static lv_obj_t *s_disconnect_btn;
 static lv_obj_t *s_pw_ta;
 
 // ---- Tables on your network card ----
+static lv_obj_t *s_tables_card;
 static lv_obj_t *s_tables_list;
 static lv_obj_t *s_tables_empty;
 static lv_obj_t *s_refresh_label;
@@ -472,6 +473,14 @@ static void on_wifi_event(bool connected)
         // until you thought to press it — it looked like discovery was broken.
         if (!s_auto_scanned) {
             s_auto_scanned = start_discovery();
+            // ...and bring the card into view. The scan already ran on connect,
+            // but the tables card sits below the fold, so the result landed
+            // somewhere the user had to go looking for -- which reads as
+            // nothing having happened. Nothing on this panel scrolls by
+            // dragging (see ui.h), so scrolling has to be explicit.
+            if (s_tables_card != NULL) {
+                lv_obj_scroll_to_view(s_tables_card, LV_ANIM_ON);
+            }
         }
         // One update check per connect, never a poll loop: it is the only
         // HTTPS this panel speaks and a TLS session comes out of internal RAM.
@@ -919,6 +928,7 @@ static void manual_connect_clicked(lv_event_t *e)
 static void build_tables_card(lv_obj_t *column)
 {
     lv_obj_t *card = make_card(column);
+    s_tables_card = card;
 
     lv_obj_t *head = make_hrow(card);
     lv_obj_t *eyebrow = make_section_label(head, "TABLES ON YOUR NETWORK");

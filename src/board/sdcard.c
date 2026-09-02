@@ -7,6 +7,9 @@
 
 #include "board.h"
 
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "esp_check.h"
@@ -17,9 +20,9 @@
 static const char *TAG = "sdcard";
 
 #define SD_SPI_HOST SPI2_HOST
-#define SD_GPIO_MOSI 11
-#define SD_GPIO_SCK 12
-#define SD_GPIO_MISO 13
+#define SD_GPIO_MOSI BOARD_SD_GPIO_MOSI
+#define SD_GPIO_SCK BOARD_SD_GPIO_SCK
+#define SD_GPIO_MISO BOARD_SD_GPIO_MISO
 
 static sdmmc_card_t *s_card;
 static bool s_bus_ready;

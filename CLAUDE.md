@@ -27,9 +27,20 @@ doubt, read the QML source — do not invent behavior.
   800x480 panel is ~0.135 mm square pixels and would be visibly over-corrected.
 - **Releases carry two images.** `firmware.bin` is the 5B (unchanged, so panels
   in the field keep updating) and `firmware-800x480.bin` is the 5/7; `ota.c`
-  picks by `BOARD_PANEL_800X480`. Both boards are esp32s3 and nothing else
+  picks by `BOARD_PANEL_800X480`, and the manifest offers both as a `Board`
+  choice so the web installer can ask. Both boards are esp32s3 and nothing else
   distinguishes them, so a single image would let an 800x480 panel flash a
-  1024x600 build. A missing image 404s, which fails safe.
+  1024x600 build. A missing image 404s, which fails safe — a manifest that
+  omits one does NOT, which is how v0.1.3 shipped with the 800x480 image
+  present and uninstallable.
+- **`tools/release_spec.py` declares what a release is** (envs, images,
+  offsets, the `Board` → `Installation type` tree); `build_release.py` builds
+  against it and `tools/check_release.py` verifies against it. Add a panel
+  there, in `BOARDS`, and the check fails until the manifest offers it. Never
+  hard-code an offset or an image name anywhere else, and never publish past
+  a `check_release` failure — it runs in `build_release.py`, in the release
+  workflow after the artifacts are committed, and in `check-releases.yml` on
+  every push touching `releases/`. See RELEASING.md.
 - Build: `pio run -e waveshare-5b` (or `-e waveshare-7`) · Flash: add `-t upload`
   · Monitor: `pio device monitor -e <env>`. Bare `pio run` builds BOTH envs.
 - OTA (same contract as dune-weaver-firmware, `src/net/ota.c`): the panel RUNS
@@ -151,6 +162,52 @@ doubt, read the QML source — do not invent behavior.
   CARD_W 144 / CARD_H 163 / preview 136, and **height is its binding axis**
   where the 5B's was width. Detail preview is 300 there, which lands exactly
   on the master tile size, so it blits 1:1.
+
+## Elecrow CrowPanel Advance 5.0-HMI (env `crowpanel-adv-5`)
+
+A third board, and NOT a Waveshare derivative: `src/board/board_crowpanel5.c`
+replaces `board.c` wholesale for this env. 5" 800x480, ESP32-S3-WROOM-1-N16R8,
+so the whole UI carries over via `BOARD_PANEL_800X480`; pixels are square, so
+it does NOT set `BOARD_WAVESHARE_7`. Pin map from Elecrow's factory code
+(`Elecrow-RD/CrowPanel-Advance-HMI-ESP32-AI-Display`, `5.0/factory_code`).
+
+- **The DIP table changed between board revisions, and the silkscreen, the
+  schematic and the factory code all show the OLD one.** TF Card is
+  `S1 S0 = 1 0` on v1.0 but **`1 1` ("MIC & TF Card") on v1.1+**, which is what
+  ships now. ON really does mean 1 (K1's commons go to 3V3, R56/R57 are
+  pull-downs). Wrong position = `sdmmc_card_init failed (0x107)` /
+  `ESP_ERR_TIMEOUT` forever, indistinguishable from a dead card. Verified
+  2026-09-01 by retrying the mount while cycling all four positions -- do that
+  rather than trusting any printed table.
+- Which revision you have shows in the boot log: `expander probe: TCA9534@0x18
+  ... STC8@0x30 ...`. v1.0 has the TCA9534/PCA9557; v1.1+ has the STC8.
+- **PCLK is 16 MHz, not the 21 Elecrow's LovyanGFX demo uses.** At 21 the image
+  DRIFTS (RGB DMA underrun). These timings leave 20 clocks of horizontal
+  blanking against the 5B's 345, so there is almost no slack to refill bounce
+  buffers in; LovyanGFX gets away with it by driving the panel differently.
+  Buy refresh back with PORCHES, never with PCLK.
+- **Backlight is an STC8H1K28 at I2C 0x30 and the byte is inverted between
+  revisions**: v1.1 is `0x05`(off)..`0x10`(max), **v1.2+ is `0`(brightest)..
+  `245`(off)**. Getting it backwards fails silently -- the screen just never
+  goes dark on sleep. `STC8_BL_V11` in board_crowpanel5.c flips it. Because
+  this is a real brightness control, sleep can DIM instead of cutting the
+  converter (`board_backlight_level`), which is the structural answer to the
+  5B's white-halo artifact.
+- **No USB-Serial-JTAG**: GPIO19/20 are the I2S microphone, so the console goes
+  out UART0 to an onboard CH340K. `custom_sdkconfig` in platformio.ini sets
+  `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` for this env only (via
+  `tools/sdkconfig_env.py` -- PlatformIO has no per-env sdkconfig defaults).
+- **macOS needs WCH's CH34x driver** for that CH340K (`1a86:7522` is
+  vendor-class, unlike the CH343 on the Waveshare 7 which is USB CDC and works
+  out of the box). Install it from `WCHSoftGroup/ch34xser_macos`, approve the
+  system extension, reboot.
+- **Chrome steals the port.** A page holding WebSerial permission reconnects
+  the moment the board enumerates and takes it exclusively -- esptool then says
+  "port is busy", or macOS never creates `/dev/cu.*` at all. Check with
+  `lsof /dev/cu.wchusbserial*`. Clear the site's saved permission in Chrome.
+- SD chip select is not on any GPIO (`gpio_cs = GPIO_NUM_NC`), same as the
+  Waveshare boards. SD shares GPIO 4/5/6 with the I2S speaker through a CH486F
+  analog mux that no GPIO can read or set -- only the DIP moves it.
 
 ## Hardware facts (verified against Waveshare wiki + demo, do not "fix")
 

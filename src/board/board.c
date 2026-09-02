@@ -1,5 +1,7 @@
 #include "board.h"
 
+#if !defined(BOARD_CROWPANEL_ADV_5)  // board_crowpanel5.c covers that board
+
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -132,3 +134,5 @@ i2c_master_bus_handle_t board_i2c_bus(void)
 {
     return s_bus;
 }
+
+#endif  // !BOARD_CROWPANEL_ADV_5

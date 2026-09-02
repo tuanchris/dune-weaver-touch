@@ -20,3 +20,4 @@ sim/selftest_*.raw
 # Release staging (tools/build_release.py)
 release/
 sdkconfig.waveshare-7*
+sdkconfig.crowpanel-adv-5*

@@ -28,7 +28,14 @@
 // pull a 1024x600 build and come up unreadable. firmware.bin stays the 5B's
 // name so panels already in the field keep updating. A release with no matching
 // image 404s, which fails the update cleanly rather than flashing the wrong one.
-#if defined(BOARD_PANEL_800X480)
+#if defined(BOARD_CROWPANEL_ADV_5)
+// The CrowPanel is 800x480 too, but it is a DIFFERENT BOARD -- its own pin
+// map, expander and console. Selecting by panel resolution would have it pull
+// the Waveshare 7 build and flash a foreign pin map onto itself. The image is
+// per BOARD, never per panel. A release without this file 404s, which fails
+// the update cleanly.
+#define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-crowpanel-adv-5.bin"
+#elif defined(BOARD_PANEL_800X480)
 #define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-800x480.bin"
 #else
 #define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware.bin"

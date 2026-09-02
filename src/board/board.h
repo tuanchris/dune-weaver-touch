@@ -16,7 +16,38 @@
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 
-#if defined(BOARD_PANEL_800X480)
+#if defined(BOARD_CROWPANEL_ADV_5)
+
+// ---- Elecrow CrowPanel Advance 5.0-HMI: 5" 800x480 -------------------------
+// From Elecrow's own factory code (CrowPanel-Advance-HMI-ESP32-AI-Display,
+// 5.0/factory_code/LovyanGFX_Driver.h), not inferred.
+//
+// 16 MHz, NOT the 21 Elecrow's own LovyanGFX demo uses. Measured here
+// 2026-09-01: at 21 MHz the image DRIFTS -- jumps and loses centring, the
+// RGB DMA underrun signature. Their demo gets away with it because LovyanGFX
+// drives the panel differently; esp_lvgl_port refills bounce buffers during
+// BLANKING, and these timings have almost none: H total is 820 for 800
+// active, i.e. 20 clocks of horizontal blanking against the 5B's 345. Same
+// 42 MB/s peak as the 5B, a fraction of the recovery window.
+//
+// 16 MHz is the Waveshare 7's proven value at IDENTICAL timings (820 x 500),
+// giving 32 MB/s and ~39 Hz -- still far clear of the 8-15 Hz flicker band.
+// If you want the extra refresh back, buy it with PORCHES (more blanking),
+// not with PCLK.
+//
+// LovyanGFX's pclk_idle_high = 1 is the same latching choice as the
+// Waveshare boards' pclk_active_neg = 1.
+#define BOARD_LCD_H_RES 800
+#define BOARD_LCD_V_RES 480
+#define BOARD_LCD_PCLK_HZ (16 * 1000 * 1000)
+#define BOARD_LCD_HSYNC_BACK_PORCH 8
+#define BOARD_LCD_HSYNC_FRONT_PORCH 8
+#define BOARD_LCD_HSYNC_PULSE_WIDTH 4
+#define BOARD_LCD_VSYNC_BACK_PORCH 8
+#define BOARD_LCD_VSYNC_FRONT_PORCH 8
+#define BOARD_LCD_VSYNC_PULSE_WIDTH 4
+
+#elif defined(BOARD_PANEL_800X480)
 
 // ---- ESP32-S3-Touch-LCD-7: 800x480 ----------------------------------------
 // Waveshare's own values (09_lvgl_v9_demo/waveshare_rgb_lcd_port.[ch]).
@@ -82,6 +113,51 @@
 
 #endif  // BOARD_PANEL_800X480
 
+#if defined(BOARD_CROWPANEL_ADV_5)
+
+// ---- Elecrow CrowPanel Advance 5.0 GPIO map --------------------------------
+// Nothing here is shared with the Waveshare boards. LovyanGFX orders its
+// pin_d0..d15 as B0..B4, G0..G5, R0..R4, which is the same low-to-high bit
+// order esp_lcd's data_gpio_nums[] wants, so the list transfers 1:1.
+#define BOARD_LCD_GPIO_VSYNC 41
+#define BOARD_LCD_GPIO_HSYNC 40
+#define BOARD_LCD_GPIO_DE 42
+#define BOARD_LCD_GPIO_PCLK 39
+// DATA0..15 = B0..B4, G0..G5, R0..R4
+#define BOARD_LCD_GPIO_DATA0 21
+#define BOARD_LCD_GPIO_DATA1 47
+#define BOARD_LCD_GPIO_DATA2 48
+#define BOARD_LCD_GPIO_DATA3 45
+#define BOARD_LCD_GPIO_DATA4 38
+#define BOARD_LCD_GPIO_DATA5 9
+#define BOARD_LCD_GPIO_DATA6 10
+#define BOARD_LCD_GPIO_DATA7 11
+#define BOARD_LCD_GPIO_DATA8 12
+#define BOARD_LCD_GPIO_DATA9 13
+#define BOARD_LCD_GPIO_DATA10 14
+#define BOARD_LCD_GPIO_DATA11 7
+#define BOARD_LCD_GPIO_DATA12 17
+#define BOARD_LCD_GPIO_DATA13 18
+#define BOARD_LCD_GPIO_DATA14 3
+#define BOARD_LCD_GPIO_DATA15 46
+
+// Touch (GT911) shares I2C with the TCA9534 expander and the BM8563 RTC.
+#define BOARD_I2C_GPIO_SDA 15
+#define BOARD_I2C_GPIO_SCL 16
+// TP_INT is a REAL GPIO here (the Waveshare boards use 4). Held low through
+// the touch reset so the GT911 latches address 0x5D rather than 0x14.
+#define BOARD_GPIO_TP_IRQ 1
+
+// TF card, SPI. The Function Select DIP must be in the TF Card position:
+// these three pins are shared with the I2S speaker. Chip select is NOT wired
+// to a GPIO (Elecrow's own code says so), so sdcard.c runs with
+// gpio_cs = GPIO_NUM_NC, exactly as on the Waveshare boards.
+#define BOARD_SD_GPIO_MISO 4
+#define BOARD_SD_GPIO_SCK 5
+#define BOARD_SD_GPIO_MOSI 6
+
+#else
+
 // RGB signal GPIOs
 #define BOARD_LCD_GPIO_VSYNC 3
 #define BOARD_LCD_GPIO_HSYNC 46
@@ -109,6 +185,13 @@
 #define BOARD_I2C_GPIO_SDA 8
 #define BOARD_I2C_GPIO_SCL 9
 #define BOARD_GPIO_TP_IRQ 4
+
+// TF card, SPI (CS is CH422G EXIO4 -- see sdcard.c).
+#define BOARD_SD_GPIO_MOSI 11
+#define BOARD_SD_GPIO_SCK 12
+#define BOARD_SD_GPIO_MISO 13
+
+#endif  // BOARD_CROWPANEL_ADV_5
 
 // Initializes the shared I2C bus, puts the CH422G in output mode, resets the
 // touch controller (GT911 latches I2C address 0x5D while INT is held low).
