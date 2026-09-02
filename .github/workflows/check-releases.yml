@@ -1,0 +1,37 @@
+name: Check releases
+
+# Every published release under releases/ must stay installable. The release
+# workflow already runs tools/check_release.py on what it stages, but that only
+# covers releases it built: v0.1.3 was published with a manifest that never
+# mentioned the firmware-800x480.bin sitting beside it, because the manifest
+# change landed after the tag. A manifest can also be hand-edited, or an image
+# re-copied. This re-checks the whole directory on every push that touches it.
+#
+# Pure stdlib Python — no PlatformIO, no toolchain, seconds to run.
+
+on:
+  push:
+    paths:
+      - "releases/**"
+      - "tools/check_release.py"
+      - "tools/release_spec.py"
+      - ".github/workflows/check-releases.yml"
+  pull_request:
+    paths:
+      - "releases/**"
+      - "tools/check_release.py"
+      - "tools/release_spec.py"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check every release is installable
+        run: python3 tools/check_release.py releases/*

@@ -1,10 +1,43 @@
 # Releasing
 
-Dune Weaver Touch ships one board target — **`waveshare-5b`** (Waveshare
-ESP32-S3-Touch-LCD-5B, 16 MB flash, 8 MB PSRAM). Releases are published as
-**GitHub Release assets** on `tuanchris/dune-weaver-touch`: the flat `.bin`
-images, a `manifest.json` an ESP Web Tools installer can consume, and a
-convenience zip.
+Dune Weaver Touch ships **two panels from one tree**: `waveshare-5b-release`
+(5B, 1024×600) and `waveshare-7` (the 5 and the 7, 800×480). Every release
+carries an app image for each — `firmware.bin` and `firmware-800x480.bin` —
+plus the bootloader, partition table and otadata they share. Releases are
+published as **GitHub Release assets** on `tuanchris/dune-weaver-touch`, and
+the `.bin`s and `manifest.json` are also committed to `releases/<tag>/` on
+`main`, which is what the web installer reads.
+
+## What a release is, and what checks it
+
+`tools/release_spec.py` is the declaration: the envs, the images, their flash
+offsets, and the `Board` → `Installation type` tree the manifest offers.
+`tools/build_release.py` builds against it, `tools/check_release.py` verifies
+against it. Nothing else should hard-code an offset or an image name.
+
+```sh
+python3 tools/check_release.py releases/v0.1.3   # a published release
+python3 tools/check_release.py releases/*        # everything on main
+```
+
+It fails the release if any image is missing, mis-sized or mis-hashed; if
+anything at the app offset is not an app image of this project **at this
+version**; if a `.bin` in the directory is not reachable from the manifest; if
+a choice installs an image that does not exist, or an image nothing installs;
+if a board in `BOARDS` is not offered; or if both panels somehow got the same
+binary.
+
+`build_release.py` runs it before declaring success, the release workflow
+re-runs it on the copy committed to `main`, and `check-releases.yml` runs it
+over `releases/*` on every push that touches them.
+
+**This exists because v0.1.3 shipped broken.** The 800×480 image was built,
+staged, published and committed — and the manifest, generated before the
+two-board change landed, never mentioned it. Every byte a 7 owner needed was
+on the server, and the installer still offered them only the 1024×600 build,
+which flashes cleanly and boots unreadable. Nothing errored. Releases before
+v0.1.3 are genuinely single-board (`MULTI_BOARD_SINCE` in `release_spec.py`),
+so the board rules do not apply to them.
 
 ## Cut a release
 
@@ -77,7 +110,7 @@ python3 tools/build_release.py -v     # verbose pio output
 ```
 
 The tag comes from `DW_RELEASE_TAG` if set, else `git describe`. `release/` is
-gitignored. Flash offsets live in `IMAGES` at the top of the script and mirror
+gitignored. Flash offsets live in `IMAGES` in `tools/release_spec.py` and mirror
 `.pio/build/waveshare-5b/flasher_args.json` — if the partition table moves,
 re-read that file rather than editing the offsets from memory. Note the S3 boots
 its bootloader from `0x0`, not the `0x1000` you may remember from the ESP32.
@@ -139,6 +172,10 @@ into the tracked `releases/<tag>/` on the default branch.
   version shows up in the picker (that list comes from the API, which *is*
   CORS-enabled) and then the manifest 404s. If someone reports that, check the
   branch, not the release.
+- **A release whose manifest does not offer both panels is worse than
+  invisible** — the version installs, and the wrong half of the owners get an
+  unreadable screen. `tools/check_release.py` is the backstop; do not publish
+  past it.
 - The convenience zip stays an asset only; nothing reads it from the branch,
   and it would double what this repo grows by per release (~1.65 MB as it is).
 - `release/` (singular, staging) is gitignored; `releases/` (plural, tracked)

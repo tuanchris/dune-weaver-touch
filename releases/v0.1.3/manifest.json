@@ -39,6 +39,15 @@
         "algorithm": "SHA2-256",
         "value": "46eae3ef6ca86026f9409cc43de71467d57a2beb0f7915e47792fcf9710770c9"
       }
+    },
+    "esp32s3-firmware-800x480": {
+      "size": 1658032,
+      "offset": "0x20000",
+      "path": "firmware-800x480.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "43f1353acf870b473a203ef566ad781b907c5681499722ed569bc5c08dc4f51c"
+      }
     }
   },
   "installable": {
@@ -47,35 +56,55 @@
     "choice-name": "Board",
     "choices": [
       {
-        "name": "esp32s3",
-        "description": "Waveshare ESP32-S3-Touch-LCD-5B (16MB flash, 8MB PSRAM)",
+        "name": "ESP32-S3-Touch-LCD-5B",
+        "description": "Waveshare 5\" 1024x600 panel (16MB flash, 8MB PSRAM). Runs the light theme, because this panel flickers in mid-greys.",
         "choice-name": "Installation type",
         "choices": [
           {
-            "name": "touch-panel",
-            "description": "Dune Weaver Touch panel (WiFi + mDNS table discovery)",
-            "choice-name": "Installation type",
-            "choices": [
-              {
-                "name": "fresh-install",
-                "description": "Complete install, erasing all previous data including saved WiFi credentials.",
-                "erase": true,
-                "images": [
-                  "esp32s3-bootloader",
-                  "esp32s3-partitions",
-                  "esp32s3-otadata",
-                  "esp32s3-firmware"
-                ]
-              },
-              {
-                "name": "firmware-update",
-                "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
-                "erase": false,
-                "images": [
-                  "esp32s3-otadata",
-                  "esp32s3-firmware"
-                ]
-              }
+            "name": "fresh-install",
+            "description": "Complete install, erasing all previous data including saved WiFi credentials.",
+            "erase": true,
+            "images": [
+              "esp32s3-bootloader",
+              "esp32s3-partitions",
+              "esp32s3-otadata",
+              "esp32s3-firmware"
+            ]
+          },
+          {
+            "name": "firmware-update",
+            "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
+            "erase": false,
+            "images": [
+              "esp32s3-otadata",
+              "esp32s3-firmware"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ESP32-S3-Touch-LCD-7 or -5",
+        "description": "Waveshare 800x480 panel, 7\" or 5\" (16MB flash, 8MB PSRAM). Runs the dark theme. Not the 5B, which is 1024x600.",
+        "choice-name": "Installation type",
+        "choices": [
+          {
+            "name": "fresh-install",
+            "description": "Complete install, erasing all previous data including saved WiFi credentials.",
+            "erase": true,
+            "images": [
+              "esp32s3-bootloader",
+              "esp32s3-partitions",
+              "esp32s3-otadata",
+              "esp32s3-firmware-800x480"
+            ]
+          },
+          {
+            "name": "firmware-update",
+            "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
+            "erase": false,
+            "images": [
+              "esp32s3-otadata",
+              "esp32s3-firmware-800x480"
             ]
           }
         ]

@@ -10,6 +10,10 @@
 # image `path` fields are bare filenames so they map 1:1 onto GitHub release
 # assets, which live in a flat namespace.
 #
+# WHAT a release contains -- envs, images, offsets, the manifest tree -- lives
+# in tools/release_spec.py, so tools/check_release.py can verify a release
+# against the same declaration that built it. This script is only the doing.
+#
 # Modeled on dune-weaver-firmware's build-dw-release.py, minus what this board
 # does not have: one target instead of two (so no MCU filename prefixes), no
 # boot_app0 (the partition table is factory-only, there is no otadata), and no
@@ -24,42 +28,18 @@ import subprocess
 import sys
 from zipfile import ZIP_DEFLATED, ZipFile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import check_release  # noqa: E402
+import release_spec as spec  # noqa: E402
+
 VERBOSE = "-v" in sys.argv
 PIO = shutil.which("pio") or shutil.which("platformio") or "/opt/homebrew/bin/pio"
 
-REPO = "https://github.com/tuanchris/dune-weaver-touch"
-
-# The RELEASE env, deliberately not "waveshare-5b": that one carries
-# -DUI_DEBUG_RGB_STOP (the unmeasured sleep-panel-reset experiment) and must
-# never ship. See platformio.ini.
-ENV = "waveshare-5b-release"
-# Second image for the 800x480 boards (the 5 and the 7). ota.c fetches
-# firmware-800x480.bin on those, so a release without this would leave them
-# unable to update -- and a release that named it firmware.bin would flash a
-# 1024x600 build onto them.
-ENV_800X480 = "waveshare-7"
-IMAGE_800X480 = "firmware-800x480.bin"
-MCU = "esp32s3"
-BOARD_DESC = "Waveshare ESP32-S3-Touch-LCD-5B (16MB flash, 8MB PSRAM)"
-
-# The offsets esptool writes each image to on a fresh install. These are NOT the
-# generic ESP32 ones: the S3 boots its bootloader from 0x0, not 0x1000. Getting
-# this wrong produces a board that flashes cleanly and then will not boot.
-# Mirrored from .pio/build/<env>/flasher_args.json -- if the partition table
-# moves, re-read that file rather than editing these from memory.
-IMAGES = [
-    # name,         offset,     source filename in .pio/build/<env>/
-    ("bootloader", "0x0", "bootloader.bin"),
-    ("partitions", "0x8000", "partitions.bin"),
-    # otadata decides which slot boots. A fresh install MUST write it: the bytes
-    # already at 0xF000 on a panel coming off the old factory-only table are the
-    # tail of its phy_init partition, and a stale/garbage otadata is how you get
-    # a board that flashes cleanly and boots the wrong slot.
-    ("otadata", "0xF000", "ota_data_initial.bin"),
-    # 0x20000, NOT the 0x10000 you remember: ota_0 starts at the first 64 KB
-    # boundary above otadata. See partitions.csv.
-    ("firmware", "0x20000", "firmware.bin"),
-]
+ENV = spec.ENV
+ENV_800X480 = spec.ENV_800X480
+IMAGE_800X480 = spec.IMAGE_800X480
+MCU = spec.MCU
+IMAGES = spec.IMAGES
 
 
 def run(cmd):
@@ -130,62 +110,53 @@ for name, offset, src_name in IMAGES:
     }
     print("  %-14s %8s  %9d B" % (src_name, offset, os.path.getsize(dst)))
 
-# Build and stage the 800x480 image alongside. It is OTA-only: the web
-# installer manifest below stays 5B, so a 5/7 is installed over USB.
-print("\nBuilding the 800x480 OTA image (env: %s)\n" % ENV_800X480)
+# Build and stage the 800x480 image alongside. Two consumers, one file:
+# ota.c fetches it by name on those panels, and the manifest below offers it
+# as the second Board choice so the web installer can write it over USB.
+print("\nBuilding the 800x480 image (env: %s)\n" % ENV_800X480)
 run([PIO, "run", "-e", ENV_800X480])
 src_800 = os.path.join(".pio", "build", ENV_800X480, "firmware.bin")
 if not os.path.exists(src_800):
     sys.exit("Missing build artifact: %s" % src_800)
-shutil.copyfile(src_800, os.path.join(rel_path, IMAGE_800X480))
+dst_800 = os.path.join(rel_path, IMAGE_800X480)
+shutil.copyfile(src_800, dst_800)
 staged.append(IMAGE_800X480)
-print("  %-14s %8s  %9d B" % (IMAGE_800X480, "(ota)", os.path.getsize(src_800)))
-
-image_names = ["%s-%s" % (MCU, n) for n, _, _ in IMAGES]
-
-manifest = {
-    "name": "Dune Weaver Touch",
-    "version": tag,
-    "source_url": "%s/tree/%s" % (REPO, tag),
-    "release_url": "%s/releases/tag/%s" % (REPO, tag),
-    "images": manifest_images,
-    "installable": {
-        "name": "installable",
-        "description": "Things you can install",
-        "choice-name": "Board",
-        "choices": [{
-            "name": MCU,
-            "description": BOARD_DESC,
-            "choice-name": "Installation type",
-            "choices": [{
-                "name": "touch-panel",
-                "description": "Dune Weaver Touch panel (WiFi + mDNS table discovery)",
-                "choice-name": "Installation type",
-                "choices": [
-                    {
-                        "name": "fresh-install",
-                        "description": "Complete install, erasing all previous data "
-                                       "including saved WiFi credentials.",
-                        "erase": True,
-                        "images": image_names,
-                    },
-                    {
-                        # NVS is left alone, so the panel comes back on its own WiFi
-                        # and table. otadata ships WITH the app on purpose: this
-                        # writes ota_0, and if otadata still pointed at ota_1 the
-                        # board would boot the older slot and the update would look
-                        # like it silently did nothing.
-                        "name": "firmware-update",
-                        "description": "Update firmware only, preserving NVS (WiFi "
-                                       "credentials, table address, screen settings).",
-                        "erase": False,
-                        "images": ["%s-otadata" % MCU, "%s-firmware" % MCU],
-                    },
-                ],
-            }],
-        }],
-    },
+# Same slot as the 5B app image -- it IS the app image, for the other panel.
+manifest_images["%s-firmware-800x480" % MCU] = {
+    "size": os.path.getsize(dst_800),
+    "offset": spec.APP_OFFSET,
+    "path": IMAGE_800X480,
+    "signature": {"algorithm": "SHA2-256", "value": sha256(dst_800)},
 }
+print("  %-14s %8s  %9d B" % (IMAGE_800X480, spec.APP_OFFSET, os.path.getsize(dst_800)))
+
+# Build and stage the CrowPanel Advance 5.0. Two images, not one: it needs its
+# own bootloader (UART0 console rather than USB-Serial-JTAG, which changes the
+# bytes). partitions and otadata are byte-identical to the 5B's and stay shared.
+print("\nBuilding the CrowPanel Advance 5.0 images (env: %s)\n" % spec.ENV_CROWPANEL)
+run([PIO, "run", "-e", spec.ENV_CROWPANEL])
+crow_dir = os.path.join(".pio", "build", spec.ENV_CROWPANEL)
+for src_name, out_name, image_key, offset in (
+        ("firmware.bin", spec.IMAGE_CROWPANEL,
+         "%s-firmware-crowpanel-adv-5" % MCU, spec.APP_OFFSET),
+        ("bootloader.bin", spec.BOOTLOADER_CROWPANEL,
+         "%s-bootloader-crowpanel-adv-5" % MCU, "0x0"),
+):
+    src = os.path.join(crow_dir, src_name)
+    if not os.path.exists(src):
+        sys.exit("Missing build artifact: %s" % src)
+    dst = os.path.join(rel_path, out_name)
+    shutil.copyfile(src, dst)
+    staged.append(out_name)
+    manifest_images[image_key] = {
+        "size": os.path.getsize(dst),
+        "offset": offset,
+        "path": out_name,
+        "signature": {"algorithm": "SHA2-256", "value": sha256(dst)},
+    }
+    print("  %-14s %8s  %9d B" % (out_name, offset, os.path.getsize(dst)))
+
+manifest = spec.build_manifest(tag, manifest_images)
 
 manifest_path = os.path.join(rel_path, "manifest.json")
 with open(manifest_path, "w") as f:
@@ -202,3 +173,14 @@ with ZipFile(os.path.join(rel_path, zip_name), "w", ZIP_DEFLATED) as z:
 print("\nStaged %s/:" % rel_path)
 for name in sorted(os.listdir(rel_path)):
     print("  %-42s %9d B" % (name, os.path.getsize(os.path.join(rel_path, name))))
+
+# A release is only done if it is installable. v0.1.3 staged an image the
+# manifest never mentioned and published anyway, so this is not advisory: a
+# failure here means do not tag, do not publish.
+print()
+problems = check_release.check(rel_path)
+if problems:
+    print("\n".join("  - " + p for p in problems), file=sys.stderr)
+    sys.exit("%s is NOT installable as staged (%d problem(s)); nothing was "
+             "published." % (rel_path, len(problems)))
+print("%s checks out: every image hashes, every board is offered." % rel_path)
