@@ -1,5 +1,38 @@
 # STATE — 2026-08-27
 
+## CrowPanel 7.0-HMI brought up; a 16 MB image on 4 MB flash is a silent reboot loop (2026-09-03)
+
+James's bench panel is the ORIGINAL Elecrow CrowPanel 7.0 (N4R8: 4 MB flash),
+not the Waveshare 7 it was first taken for and not the Advance either. Flashing
+`waveshare-7` onto it gave a black screen and, on the UART port, nothing but
+the ROM banner every 0.6 s: `rst:0xc (RTC_SW_CPU_RST)`, `Saved PC` decoding
+to `esp_restart_noos` in the app ELF. Nothing else, because the image's
+console was USB-Serial-JTAG and nobody was listening there. A one-off rebuild
+with `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` put the assert on the wire:
+`spi_flash: Detected size(4096k) smaller than the size in the binary image
+header(16384k)` in `__esp_system_init_fn_init_flash` -- before app_main, so
+rollback never gets a say. `esptool flash_id` agrees: 4 MB (device 0x4016).
+
+Ported as env `crowpanel-7` + `board_crowpanel7.c` + `partitions-4mb.csv`
+(details in CLAUDE.md). Verified on the glass: boots, renders at 16 MHz,
+touch works. Found on the way: at 400 kHz the GT911 answered every register
+read with 0xCF and touch was dead; 100 kHz fixes it (`BOARD_TOUCH_I2C_HZ`).
+The Waveshare 7 and Advance 5 envs still build; their code paths are
+unchanged (the shared edits are all behind BOARD_* macros).
+
+**Open:**
+- Drift and dark-theme flicker at 16 MHz on this glass -- unmeasured. 15 MHz
+  is Elecrow's value; the beat math is in board.h.
+- TF card: real CS on GPIO10, never tried with a card.
+- Sleep dimming: `board_backlight_level` works here but screen_sleep does not
+  call it (same gap as the Advance's STC8).
+- Releases: not in `release_spec.py`; needs per-board partition tables there.
+- Sim: no `crowpanel-7` alias; `-DDWT_BOARD=7` is the same geometry.
+- Fresh-machine note: PlatformIO's tool-esptoolpy 4.9 arrived without its
+  `_contrib` deps (`No module named 'intelhex'` at the .bin step). Running
+  `package-postinstall.py` inside `~/.platformio/packages/tool-esptoolpy`
+  with the penv python repairs it.
+
 ## The panel flicker is the theme, not the driver (2026-08-27)
 
 Tuan reported "white flashes" that turned out to be flicker on low-contrast

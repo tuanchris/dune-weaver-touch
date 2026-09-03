@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "board/board.c"
         "board/board_crowpanel5.c"
+        "board/board_crowpanel7.c"
         "board/display.c"
         "board/sdcard.c"
         "net/settings.c"

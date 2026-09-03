@@ -1,6 +1,7 @@
 #include "board.h"
 
-#if !defined(BOARD_CROWPANEL_ADV_5)  // board_crowpanel5.c covers that board
+#if !defined(BOARD_CROWPANEL_ADV_5) && !defined(BOARD_CROWPANEL_7)
+// The Elecrow boards have their own files: board_crowpanel5.c, board_crowpanel7.c
 
 #include "driver/gpio.h"
 #include "esp_check.h"
@@ -135,4 +136,4 @@ i2c_master_bus_handle_t board_i2c_bus(void)
     return s_bus;
 }
 
-#endif  // !BOARD_CROWPANEL_ADV_5
+#endif  // Waveshare boards only

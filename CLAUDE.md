@@ -13,7 +13,8 @@ doubt, read the QML source — do not invent behavior.
 
 ## Commands
 
-- **Four envs.** `waveshare-5b` (1024x600, and it carries
+- **Four Waveshare envs** (the Elecrow boards, `crowpanel-adv-5` and
+  `crowpanel-7`, have their own sections below). `waveshare-5b` (1024x600, and it carries
   `-DUI_DEBUG_RGB_STOP` by default — standing practice per Tuan 2026-08-28, the
   live white-halo experiment, so every bench flash of the 5B gets it);
   `waveshare-5b-release` (the same board WITHOUT that flag — what
@@ -208,6 +209,63 @@ it does NOT set `BOARD_WAVESHARE_7`. Pin map from Elecrow's factory code
 - SD chip select is not on any GPIO (`gpio_cs = GPIO_NUM_NC`), same as the
   Waveshare boards. SD shares GPIO 4/5/6 with the I2S speaker through a CH486F
   analog mux that no GPIO can read or set -- only the DIP moves it.
+
+## Elecrow CrowPanel 7.0-HMI (env `crowpanel-7`)
+
+The ORIGINAL CrowPanel 7" (DIS07070H; Elecrow wiki "ESP32 Display-7.0 inch
+Intelligent Touch Screen"). NOT the Advance series and NOT the Waveshare 7,
+and none of their pin maps apply. `src/board/board_crowpanel7.c` replaces
+`board.c` for this env. 800x480 RGB on an ESP32-S3-WROOM-1-N4R8 -- **4 MB
+flash**, 8 MB octal PSRAM. Pin map and timings are Elecrow's LovyanGFX config,
+identical across their V1.0/V2.0/V3.0 examples. Brought up 2026-09-03: boots,
+renders, touch works. UNMEASURED: drift at 16 MHz, dark-theme flicker, the TF
+card, sleep dimming.
+
+- **4 MB flash is the trap.** Any 16 MB env flashed onto it asserts in flash
+  init -- `spi_flash: Detected size(4096k) smaller than the size in the
+  binary image header(16384k)` -- and reboots every 0.6 s. The assert prints
+  on the console the IMAGE was built for, so a Waveshare image shows nothing:
+  the UART port just repeats the ROM banner, `rst:0xc (RTC_SW_CPU_RST)` with
+  `Saved PC` decoding to `esp_restart_noos`. A boot loop faster than
+  app_main's ~650 ms start with no app output is this, not a crash in init.
+  The env carries `partitions-4mb.csv` (same nvs/otadata offsets, two 1920 KB
+  OTA slots) and `CONFIG_ESPTOOLPY_FLASHSIZE_4MB`; the app fills ~85% of a
+  slot, so watch the image size on this board.
+- Console is UART0 through the onboard CH340 -- `/dev/cu.usbserial-*` with
+  macOS's built-in driver, unlike the Advance's CH340K. Always pass the port:
+  `pio run -e crowpanel-7 -t upload --upload-port /dev/cu.usbserial-XXXX`,
+  `pio device monitor --port /dev/cu.usbserial-XXXX -b 115200`. DTR/RTS
+  auto-reset works every time.
+- **GPIO19/20 are the touch I2C** -- the S3's USB pins. The env disables the
+  USB-Serial-JTAG peripheral AND the secondary console
+  (`CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n`, `CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`);
+  only then does IDF release the USB pad at startup (`clk.c`). A fresh
+  sdkconfig defaults the secondary console to USB-Serial-JTAG, which `select`s
+  the peripheral back on and keeps the pad on the bus.
+- **Touch I2C runs at 100 kHz** (`BOARD_TOUCH_I2C_HZ`). At the Waveshare
+  boards' 400 kHz every GT911 register read returned 0xCF -- product ID and
+  config version alike -- and touch was dead while the address still ACKed.
+  At 100 kHz it reads `0x39,0x31,0x31` ("911"), config 101, and works.
+- No IO expander and no touch reset: INT and RST reach nothing on any
+  revision (every Elecrow example passes -1 for both), so `display.c` probes
+  0x5D then 0x14 (`BOARD_TOUCH_ADDR_PROBE`). Raw GT911 coordinates match the
+  panel with no mirroring -- Elecrow's example inverts twice (TAMC
+  `ROTATION_NORMAL`, then `map(800..0)`), a no-op.
+- Backlight is GPIO2 into the boost enable, driven by LEDC (1 kHz, 10-bit), so
+  `board_backlight_level` is a real dimmer here. Nothing calls it yet.
+- TF card is SPI 11/13/12 with a REAL chip select on GPIO10
+  (`BOARD_SD_GPIO_CS`, the only board with one). Untested with a card.
+- 16 MHz PCLK on Elecrow's 40/48/40 + 1/31/13 porches: 928 x 525 = 487,200
+  clocks/frame, ~32.8 Hz, beat ~16.4 Hz -- just above the 8-15 Hz flicker
+  band. Elecrow's own 15 MHz sits at 30.8 Hz / 15.4 Hz. H blanking is 128
+  clocks, seven times the Advance's, so there is room to go up if it beats,
+  but measure for drift first.
+- Same 7" 800x480 glass geometry as the Waveshare 7, so the env sets
+  `BOARD_WAVESHARE_7` (theme.h aspect correction only).
+- **Not in `tools/release_spec.py`.** It needs its own bootloader, partition
+  table and app image, and the spec has no per-board partition table. `ota.c`
+  names `firmware-crowpanel-7.bin`, which 404s (fails safe) until a release
+  carries it.
 
 ## Hardware facts (verified against Waveshare wiki + demo, do not "fix")
 

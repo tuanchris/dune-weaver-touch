@@ -67,7 +67,11 @@ esp_err_t sdcard_mount(void)
 
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.host_id = SD_SPI_HOST;
-    slot.gpio_cs = GPIO_NUM_NC;  // CS is the CH422G line, held low above
+#if defined(BOARD_SD_GPIO_CS)
+    slot.gpio_cs = BOARD_SD_GPIO_CS;  // a real GPIO (CrowPanel 7.0); the driver drives it
+#else
+    slot.gpio_cs = GPIO_NUM_NC;  // CS is the expander line, held low above
+#endif
 
     const esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
         .format_if_mount_failed = false,  // a bad card is the user's to fix

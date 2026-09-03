@@ -9,6 +9,10 @@
 // #defines and not a second board file. Verified against Waveshare's own
 // demos: ESP-IDF/08_lvgl_Porting (5B) and
 // ESP-IDF/09_lvgl_v9_demo/components/waveshare_rgb_lcd_port.[ch] (7).
+//
+// The Elecrow boards are NOT derivatives and get their own files --
+// board_crowpanel5.c (Advance 5.0) and board_crowpanel7.c (7.0-HMI) -- but
+// their pin maps and timings live here too, under BOARD_CROWPANEL_*.
 #pragma once
 
 #include <stdbool.h>
@@ -46,6 +50,31 @@
 #define BOARD_LCD_VSYNC_BACK_PORCH 8
 #define BOARD_LCD_VSYNC_FRONT_PORCH 8
 #define BOARD_LCD_VSYNC_PULSE_WIDTH 4
+
+#elif defined(BOARD_CROWPANEL_7)
+
+// ---- Elecrow CrowPanel 7.0-HMI (original series): 7" 800x480 ---------------
+// Elecrow's LovyanGFX config for this board (wiki, and the
+// CrowPanel-7.0-HMI-ESP32-Display-800x480 examples, identical across the
+// V1.0/V2.0/V3.0 revisions): 40/48/40 horizontal, 1/31/13 vertical,
+// pclk_active_neg = 1. That is 928 x 525 = 487,200 clocks/frame, so Elecrow's
+// 15 MHz is ~30.8 Hz with a ~15.4 Hz frame-inversion beat -- the top edge of
+// the 8-15 Hz band that makes the 5B flicker. 16 MHz (32.8 Hz, 16.4 Hz beat)
+// is used instead: the same peak DMA as the Advance 5 at 16 MHz (32 MB/s),
+// and this panel gives the bounce buffers 128 clocks of horizontal blanking
+// to refill in, seven times the Advance's 20. UNMEASURED on this glass as of
+// 2026-09-03: if the dark theme beats, more PCLK is the lever (the EK9716
+// controller is rated well above this), but check for drift first -- the 5B
+// history below is the reason.
+#define BOARD_LCD_H_RES 800
+#define BOARD_LCD_V_RES 480
+#define BOARD_LCD_PCLK_HZ (16 * 1000 * 1000)
+#define BOARD_LCD_HSYNC_BACK_PORCH 40
+#define BOARD_LCD_HSYNC_FRONT_PORCH 40
+#define BOARD_LCD_HSYNC_PULSE_WIDTH 48
+#define BOARD_LCD_VSYNC_BACK_PORCH 13
+#define BOARD_LCD_VSYNC_FRONT_PORCH 1
+#define BOARD_LCD_VSYNC_PULSE_WIDTH 31
 
 #elif defined(BOARD_PANEL_800X480)
 
@@ -156,6 +185,57 @@
 #define BOARD_SD_GPIO_SCK 5
 #define BOARD_SD_GPIO_MOSI 6
 
+#elif defined(BOARD_CROWPANEL_7)
+
+// ---- Elecrow CrowPanel 7.0-HMI GPIO map ------------------------------------
+// From Elecrow's LovyanGFX config (wiki). pin_d0..d15 = B0..B4, G0..G5,
+// R0..R4 is esp_lcd's data_gpio_nums[] order, so it transfers 1:1. PCLK sits
+// on GPIO0, a strapping pin -- Elecrow's own choice, harmless once booted.
+#define BOARD_LCD_GPIO_VSYNC 40
+#define BOARD_LCD_GPIO_HSYNC 39
+#define BOARD_LCD_GPIO_DE 41
+#define BOARD_LCD_GPIO_PCLK 0
+// DATA0..15 = B0..B4, G0..G5, R0..R4
+#define BOARD_LCD_GPIO_DATA0 15
+#define BOARD_LCD_GPIO_DATA1 7
+#define BOARD_LCD_GPIO_DATA2 6
+#define BOARD_LCD_GPIO_DATA3 5
+#define BOARD_LCD_GPIO_DATA4 4
+#define BOARD_LCD_GPIO_DATA5 9
+#define BOARD_LCD_GPIO_DATA6 46
+#define BOARD_LCD_GPIO_DATA7 3
+#define BOARD_LCD_GPIO_DATA8 8
+#define BOARD_LCD_GPIO_DATA9 16
+#define BOARD_LCD_GPIO_DATA10 1
+#define BOARD_LCD_GPIO_DATA11 14
+#define BOARD_LCD_GPIO_DATA12 21
+#define BOARD_LCD_GPIO_DATA13 47
+#define BOARD_LCD_GPIO_DATA14 48
+#define BOARD_LCD_GPIO_DATA15 45
+
+// Backlight: a plain enable into the boost driver, PWM'd by LEDC in
+// board_crowpanel7.c (Elecrow's examples do the same, at 300 Hz).
+#define BOARD_GPIO_BACKLIGHT 2
+
+// Touch (GT911) on the S3's USB pins. Neither INT nor RST reaches the ESP on
+// any revision (every Elecrow example passes -1 for both), so the address it
+// latched at its own power-on is whatever it is: display.c probes 0x5D, then
+// 0x14, instead of assuming.
+#define BOARD_I2C_GPIO_SDA 19
+#define BOARD_I2C_GPIO_SCL 20
+#define BOARD_TOUCH_ADDR_PROBE 1
+// 100 kHz, not the 400 the Waveshare boards run: at 400 every GT911 register
+// read came back 0xCF (product ID AND config version), the signature of
+// edges too slow for the clock on this board's pull-ups. Measured 2026-09-03.
+#define BOARD_TOUCH_I2C_HZ 100000
+
+// TF card, SPI, with a REAL chip select for once: the sdspi driver drives it
+// (sdcard.c) and board_sd_select is a no-op.
+#define BOARD_SD_GPIO_MOSI 11
+#define BOARD_SD_GPIO_MISO 13
+#define BOARD_SD_GPIO_SCK 12
+#define BOARD_SD_GPIO_CS 10
+
 #else
 
 // RGB signal GPIOs
@@ -191,7 +271,7 @@
 #define BOARD_SD_GPIO_SCK 12
 #define BOARD_SD_GPIO_MISO 13
 
-#endif  // BOARD_CROWPANEL_ADV_5
+#endif  // board GPIO map
 
 // Initializes the shared I2C bus, puts the CH422G in output mode, resets the
 // touch controller (GT911 latches I2C address 0x5D while INT is held low).

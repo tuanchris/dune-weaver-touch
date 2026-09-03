@@ -35,6 +35,12 @@
 // per BOARD, never per panel. A release without this file 404s, which fails
 // the update cleanly.
 #define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-crowpanel-adv-5.bin"
+#elif defined(BOARD_CROWPANEL_7)
+// Same rule for the original CrowPanel 7.0: its own board, its own image --
+// and a 4 MB flash on top, so a 16 MB image header asserts in flash init. No
+// release carries this file yet (tools/release_spec.py does not know the
+// board), so the update check 404s, which fails safe.
+#define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-crowpanel-7.bin"
 #elif defined(BOARD_PANEL_800X480)
 #define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-800x480.bin"
 #else
