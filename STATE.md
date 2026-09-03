@@ -20,6 +20,19 @@ read with 0xCF and touch was dead; 100 kHz fixes it (`BOARD_TOUCH_I2C_HZ`).
 The Waveshare 7 and Advance 5 envs still build; their code paths are
 unchanged (the shared edits are all behind BOARD_* macros).
 
+Also found here, and it is not board-specific: **wake from sleep stalled with
+the backlight off** whenever nothing else repainted. `screen_sleep.c` lights
+the panel after three REFR_READY events, on the assumption they come every
+refresh tick; LVGL 9.5 pauses the refresh timer when nothing is invalid, so
+they come per REPAINT. The tap's black shield and the shield's deletion are
+the only two frames a quiet panel produces, the count parked at 1, and the
+glass stayed dark with LVGL alive. With a table connected the status polls
+supply the third frame within a second, which is why nobody saw it. Fix:
+each counted frame invalidates the screen to provoke the next. Proven with
+`-DUI_DEBUG_SLEEP_CYCLE` (hands-free sleep/synthetic-wake soak, logs every
+counted frame and reads the backlight pad back): 3 frames in ~200 ms, and a
+real tap on the glass then lit the panel.
+
 **Open:**
 - Drift and dark-theme flicker at 16 MHz on this glass -- unmeasured. 15 MHz
   is Elecrow's value; the beat math is in board.h.

@@ -65,6 +65,10 @@ doubt, read the QML source — do not invent behavior.
   the top slot.
 - Console is native USB CDC (`/dev/cu.usbmodem*`); UART0 is physically wired to RS485.
 - First build downloads managed components into `managed_components/` (gitignored).
+  **No `dependencies.lock` is tracked**, so every fresh machine pulls the newest
+  LVGL and esp_lvgl_port (9.5.0 / 2.9.0 on 2026-09-03). Behaviour validated on
+  an older LVGL can differ: 9.5 pauses the refresh timer when nothing is
+  invalid, which stalled the sleep-wake gate until it provoked its own frames.
 - Table sim: `python tools/table_sim.py` — mock table on the LAN (mDNS `DWSIM`,
   port 8080, TXT `model=dune-weaver`) implementing the PORTING_NOTES API against
   the real dune-weaver-pi pattern library, `/sd` throttled to ~45 KB/s like a
@@ -314,6 +318,10 @@ card, sleep dimming.
   This is also how to tell real image sticking from what an un-driven panel
   always looks like (backlight on, RGB timing stopped = a violet wash with
   every non-uniformity on show; that is normal, not damage).
+  `-DUI_DEBUG_SLEEP_CYCLE` sleeps after 8 s, synthesizes the wake tap 5 s
+  later and logs every counted frame (plus the backlight pad level on the
+  CrowPanel 7.0) — a hands-free soak for the wake path on a bench nobody is
+  tapping.
 - CH422G IO expander has no register pointer — each function is an I2C address:
   write `0x01` to addr `0x24` (all-output mode), then a bitmask to addr `0x38`.
   EXIO1=TP_RST, EXIO2=DISP/backlight, EXIO3=LCD_RST, EXIO4=SD_CS. Backlight is
@@ -391,6 +399,10 @@ card, sleep dimming.
   permissions needed); the QML reference runs against the table sim via a
   PySide6 venv (see STATE.md).
 - Keep the UI usable when disconnected — only the header dot changes state.
+- **`LV_EVENT_REFR_READY` is per repaint, not per tick.** LVGL 9.5 pauses the
+  refresh timer when nothing is invalid. Anything that counts frames (the
+  wake gate in `screen_sleep.c`) must invalidate to get the next one, or it
+  parks forever on a quiet panel — which is exactly a bench with no table.
 - **The panel never renders or stores previews.** Tiles come off the pattern
   TF card only (`thr_preview` = RAM LRU → SD, nothing else); rendering lives
   in `tools/make_pattern_sd.py`. There is no `storage` partition. No card

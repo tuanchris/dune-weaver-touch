@@ -25,6 +25,7 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "esp_rom_sys.h"
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -103,9 +104,29 @@ i2c_master_bus_handle_t board_i2c_bus(void)
     return s_bus;
 }
 
+#ifdef UI_DEBUG_SLEEP_CYCLE
+// Read the pad back: with the input buffer enabled the level the LEDC output
+// actually drives is visible, so this is a measurement, not a register echo.
+static void bl_sample(const char *what)
+{
+    gpio_input_enable(BOARD_GPIO_BACKLIGHT);
+    int high = 0;
+    for (int i = 0; i < 20; i++) {
+        high += gpio_get_level(BOARD_GPIO_BACKLIGHT);
+        esp_rom_delay_us(100);  // 2 ms of samples spans two 1 kHz periods
+    }
+    ESP_LOGI(TAG, "DEBUG: backlight %s -> GPIO%d high %d/20, ledc duty %u",
+             what, BOARD_GPIO_BACKLIGHT, high, (unsigned)ledc_get_duty(BL_MODE, BL_CHANNEL));
+}
+#endif
+
 esp_err_t board_backlight(bool on)
 {
-    return bl_set_duty(on ? BL_DUTY_MAX : 0);
+    esp_err_t err = bl_set_duty(on ? BL_DUTY_MAX : 0);
+#ifdef UI_DEBUG_SLEEP_CYCLE
+    bl_sample(on ? "ON" : "OFF");
+#endif
+    return err;
 }
 
 // Brightness, 0..255 where 0 is off and 255 is a solid high. A real dimmer,
