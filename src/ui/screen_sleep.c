@@ -59,6 +59,13 @@ static const char *TAG = "screen_sleep";
 // at 24 Hz this is ~125 ms of extra wake latency and it is not perceptible.
 #define WAKE_BLACK_FRAMES 3
 
+#ifdef UI_DEBUG_SLEEP_CYCLE
+// Hands-free sleep/wake soak for a bench board nobody is tapping: sleep after
+// 8 s idle, synthesize the wake tap 5 s later, log every counted frame.
+#define DBG_SLEEP_TIMEOUT_S 8
+#define DBG_WAKE_AFTER_S 5
+#endif
+
 static bool s_asleep;
 static lv_obj_t *s_shield;
 static uint32_t s_asleep_s;
@@ -66,13 +73,28 @@ static bool s_shield_light;
 static uint8_t s_wake_frames;
 
 // Registered for the life of the app, idle unless a wake is counting down.
+//
+// Each counted frame has to PROVOKE the next: LVGL 9.5 pauses the refresh
+// timer when nothing is invalid, so REFR_READY follows real repaints only.
+// Without the invalidate, the tap's black repaint and the shield's deletion
+// are the only two frames a quiet panel ever produces, the count parks at 1
+// and the backlight never comes on -- found on a CrowPanel 7.0 with no table
+// connected (2026-09-03), masked everywhere else by the status polls.
 static void refr_ready(lv_event_t *e)
 {
     (void)e;
-    if (s_wake_frames > 0 && --s_wake_frames == 0) {
-        board_backlight(true);
-        ESP_LOGI(TAG, "backlight on (black confirmed on glass)");
+    if (s_wake_frames == 0) {
+        return;
     }
+    if (--s_wake_frames == 0) {
+        esp_err_t err = board_backlight(true);
+        ESP_LOGI(TAG, "backlight on (black confirmed on glass) -> %s", esp_err_to_name(err));
+        return;
+    }
+#ifdef UI_DEBUG_SLEEP_CYCLE
+    ESP_LOGI(TAG, "wake frame counted, %u to go", (unsigned)s_wake_frames);
+#endif
+    lv_obj_invalidate(lv_screen_active());
 }
 
 // The shield is an opaque cover on lv_layer_sys (above every page, dialog, and
@@ -143,6 +165,14 @@ static void check_timer(lv_timer_t *t)
             return;  // nothing to repaint: the panel is ignoring the pixel stream
         }
 #endif
+#ifdef UI_DEBUG_SLEEP_CYCLE
+        if (s_asleep_s == DBG_WAKE_AFTER_S && s_shield != NULL) {
+            ESP_LOGI(TAG, "DEBUG: synthesizing wake tap");
+            lv_obj_send_event(s_shield, LV_EVENT_PRESSED, NULL);
+            lv_obj_send_event(s_shield, LV_EVENT_RELEASED, NULL);
+            return;
+        }
+#endif
         if (s_asleep_s % REPOLARIZE_PERIOD_S == 0 && s_shield != NULL) {
             s_shield_light = !s_shield_light;
             lv_obj_set_style_bg_color(
@@ -152,6 +182,13 @@ static void check_timer(lv_timer_t *t)
         return;
     }
     uint32_t timeout_s = settings_get()->screen_timeout_s;  // live: chips apply now
+#ifdef UI_DEBUG_SLEEP_CYCLE
+    timeout_s = DBG_SLEEP_TIMEOUT_S;
+    static uint32_t s_dbg_ticks;
+    if (++s_dbg_ticks % 5 == 0) {
+        ESP_LOGI(TAG, "DEBUG: lvgl alive, inactive %u ms", (unsigned)lv_display_get_inactive_time(NULL));
+    }
+#endif
     if (timeout_s == 0) {
         return;  // "Never"
     }

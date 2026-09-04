@@ -144,7 +144,22 @@ esp_err_t display_init(void)
     // GT911 over the shared I2C bus; INT/RST already handled in board_init()
     esp_lcd_panel_io_handle_t tp_io = NULL;
     esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+#if defined(BOARD_TOUCH_I2C_HZ)
+    tp_io_cfg.scl_speed_hz = BOARD_TOUCH_I2C_HZ;
+#else
     tp_io_cfg.scl_speed_hz = 400000;
+#endif
+#if defined(BOARD_TOUCH_ADDR_PROBE)
+    // No INT/RST latch on this board (board.h), so the GT911 answers at
+    // whichever address it chose for itself at power-on. Default first, then
+    // the backup; an unanswered probe leaves the default and the driver's own
+    // error says so.
+    if (i2c_master_probe(board_i2c_bus(), (uint16_t)tp_io_cfg.dev_addr, 50) != ESP_OK &&
+        i2c_master_probe(board_i2c_bus(), ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, 50) == ESP_OK) {
+        tp_io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP;
+    }
+    ESP_LOGI(TAG, "GT911 at 0x%02X", (unsigned)tp_io_cfg.dev_addr);
+#endif
     ESP_RETURN_ON_ERROR(
         esp_lcd_new_panel_io_i2c(board_i2c_bus(), &tp_io_cfg, &tp_io), TAG, "tp io");
 

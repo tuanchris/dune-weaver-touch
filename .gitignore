@@ -21,3 +21,4 @@ sim/selftest_*.raw
 release/
 sdkconfig.waveshare-7*
 sdkconfig.crowpanel-adv-5*
+sdkconfig.crowpanel-7*

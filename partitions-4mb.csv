@@ -1,0 +1,17 @@
+# Name,   Type, SubType, Offset,   Size,     Flags
+# 4 MB flash layout (2026-09-03), for the Elecrow CrowPanel 7.0-HMI: that
+# board ships an ESP32-S3-WROOM-1-N4R8, and a 16 MB image asserts in flash
+# init ("Detected size(4096k) smaller than the size in the binary image
+# header") and reboots forever -- which is what flashing ANY other env onto
+# it looks like.
+#
+# Same shape as partitions.csv, so ota.c and settings need nothing: nvs and
+# otadata at the same offsets and sizes (partitions.csv says why nvs must
+# never move), two OTA slots, no data partition. The slots are what shrinks:
+# 1,966,080 B each against a ~1.67 MB app, so ~15% headroom rather than 2.4x.
+# Watch the image size on this board. If it ever outgrows a slot the only
+# alternative on 4 MB is a single factory app with no OTA.
+nvs,      data, nvs,     0x9000,   0x6000,
+otadata,  data, ota,     0xF000,   0x2000,
+ota_0,    app,  ota_0,   0x20000,  0x1E0000,
+ota_1,    app,  ota_1,   0x200000, 0x1E0000,
