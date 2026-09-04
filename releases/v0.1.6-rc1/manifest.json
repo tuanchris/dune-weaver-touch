@@ -1,0 +1,159 @@
+{
+  "name": "Dune Weaver Touch",
+  "version": "v0.1.6-rc1",
+  "source_url": "https://github.com/tuanchris/dune-weaver-touch/tree/v0.1.6-rc1",
+  "release_url": "https://github.com/tuanchris/dune-weaver-touch/releases/tag/v0.1.6-rc1",
+  "images": {
+    "esp32s3-bootloader": {
+      "size": 22592,
+      "offset": "0x0",
+      "path": "bootloader.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "9a932d3616434bcbcaf6938893cb716bc7564c032eeeef27d0c262890588f349"
+      }
+    },
+    "esp32s3-partitions": {
+      "size": 3072,
+      "offset": "0x8000",
+      "path": "partitions.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "906f0cf80ce02d28ba19369e2fb300ad0e15a89eb95384db805a3246d6ce494d"
+      }
+    },
+    "esp32s3-otadata": {
+      "size": 8192,
+      "offset": "0xF000",
+      "path": "ota_data_initial.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+      }
+    },
+    "esp32s3-firmware": {
+      "size": 1732064,
+      "offset": "0x20000",
+      "path": "firmware.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "55e792391487e329537bfd6c5ef636d85649a25b77b9b916be2639e7edb5d8e1"
+      }
+    },
+    "esp32s3-firmware-800x480": {
+      "size": 1658080,
+      "offset": "0x20000",
+      "path": "firmware-800x480.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "d60f141ec98905fb0c9b8ac6fb5adec78519fdae8bfe4c25f6148caffacedc39"
+      }
+    },
+    "esp32s3-firmware-crowpanel-adv-5": {
+      "size": 1669024,
+      "offset": "0x20000",
+      "path": "firmware-crowpanel-adv-5.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "43066a21ddcc28bcc7ed1380219b86e4078b770705a85bee827456cd53745295"
+      }
+    },
+    "esp32s3-bootloader-crowpanel-adv-5": {
+      "size": 22576,
+      "offset": "0x0",
+      "path": "bootloader-crowpanel-adv-5.bin",
+      "signature": {
+        "algorithm": "SHA2-256",
+        "value": "aaea612244446c6c0b1b8bec20e944a42bae51279b52b7faec5d563c6a90728e"
+      }
+    }
+  },
+  "installable": {
+    "name": "installable",
+    "description": "Things you can install",
+    "choice-name": "Board",
+    "choices": [
+      {
+        "name": "ESP32-S3-Touch-LCD-5B",
+        "description": "Waveshare 5\" 1024x600 panel (16MB flash, 8MB PSRAM). Runs the light theme, because this panel flickers in mid-greys.",
+        "choice-name": "Installation type",
+        "choices": [
+          {
+            "name": "fresh-install",
+            "description": "Complete install, erasing all previous data including saved WiFi credentials.",
+            "erase": true,
+            "images": [
+              "esp32s3-bootloader",
+              "esp32s3-partitions",
+              "esp32s3-otadata",
+              "esp32s3-firmware"
+            ]
+          },
+          {
+            "name": "firmware-update",
+            "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
+            "erase": false,
+            "images": [
+              "esp32s3-otadata",
+              "esp32s3-firmware"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ESP32-S3-Touch-LCD-7 or -5",
+        "description": "Waveshare 800x480 panel, 7\" or 5\" (16MB flash, 8MB PSRAM). Runs the dark theme. Not the 5B, which is 1024x600.",
+        "choice-name": "Installation type",
+        "choices": [
+          {
+            "name": "fresh-install",
+            "description": "Complete install, erasing all previous data including saved WiFi credentials.",
+            "erase": true,
+            "images": [
+              "esp32s3-bootloader",
+              "esp32s3-partitions",
+              "esp32s3-otadata",
+              "esp32s3-firmware-800x480"
+            ]
+          },
+          {
+            "name": "firmware-update",
+            "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
+            "erase": false,
+            "images": [
+              "esp32s3-otadata",
+              "esp32s3-firmware-800x480"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Elecrow CrowPanel Advance 5.0-HMI",
+        "description": "Elecrow 5\" 800x480 panel (16MB flash, 8MB PSRAM). Runs the dark theme. Set the Function Select DIP to 1 1 (both ON) or the TF card will not be detected.",
+        "choice-name": "Installation type",
+        "choices": [
+          {
+            "name": "fresh-install",
+            "description": "Complete install, erasing all previous data including saved WiFi credentials.",
+            "erase": true,
+            "images": [
+              "esp32s3-bootloader-crowpanel-adv-5",
+              "esp32s3-partitions",
+              "esp32s3-otadata",
+              "esp32s3-firmware-crowpanel-adv-5"
+            ]
+          },
+          {
+            "name": "firmware-update",
+            "description": "Update firmware only, preserving NVS (WiFi credentials, table address, screen settings).",
+            "erase": false,
+            "images": [
+              "esp32s3-otadata",
+              "esp32s3-firmware-crowpanel-adv-5"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
