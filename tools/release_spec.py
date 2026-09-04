@@ -34,11 +34,18 @@ OTADATA_OFFSET = "0xF000"
 APP_OFFSET = "0x20000"
 
 # Built once and shared by every board. MEASURED, not assumed (2026-09-04):
-# ota_data_initial.bin is byte-identical across waveshare-7, crowpanel-adv-5
-# and crowpanel-7. The other two are not, which is why they live per board:
-#   bootloader   differs on ALL THREE -- console config and, on the 7.0-HMI,
-#                the 4 MB flash size in the image header
-#   partitions   waveshare-7 == crowpanel-adv-5; crowpanel-7 differs (4 MB)
+# ota_data_initial.bin is byte-identical across all four envs, and so is the
+# 16 MB partition table wherever it is used. The bootloader is not:
+#   bootloader   PER BOARD, all four. On crowpanel-adv-5 and crowpanel-7 the
+#                bytes genuinely differ (console config, and the 4 MB flash
+#                size in the 7.0-HMI's image header). waveshare-5 and
+#                waveshare-7 build identical bootloader CODE -- but
+#                esp_bootloader_desc_t embeds the build timestamp, so two envs
+#                built minutes apart never hash the same, and build_release.py
+#                refuses to stage one over the other. Sharing the name would
+#                fail the release, not save 22 KB.
+#   partitions   waveshare-5 == waveshare-7 == crowpanel-adv-5;
+#                crowpanel-7 differs (4 MB)
 # Re-measure before sharing anything else here; the last time this was assumed
 # rather than checked, a release shipped an image nobody could install.
 OTADATA = ("%s-otadata" % MCU, "ota_data_initial.bin")
@@ -87,18 +94,49 @@ def version_key(version):
 # which it uses, because getting a bootloader from the wrong env is silent.
 BOARDS = [
     {
-        # ONE image for both: they differ only in whether the glass has square
-        # pixels, and this is the 7's build, so a 5 gets the 7's 7.6% aspect
-        # correction. The 5 is untested hardware; revisit when one is measured,
-        # and until then it beats a 1024x600 build.
-        "name": "ESP32-S3-Touch-LCD-7 or -5",
+        # 7" glass only: its pixels are 7.6% wider than tall, so `waveshare-7`
+        # sets BOARD_WAVESHARE_7 and the build carries TH_PX_ASPECT_X1000 =
+        # 1076 (theme.h).
+        #
+        # Shipped as "ESP32-S3-Touch-LCD-7 or -5" from v0.1.3 through
+        # v0.1.6-rc2, when it was the only 800x480 image a release carried and
+        # a 5 owner installed it with an aspect correction their square pixels
+        # do not want. The 5 has its own image from v0.1.6-rc3 (below), so the
+        # name is honest again -- and `aka` keeps those published releases
+        # passing, since they offer the old name and always will.
+        "name": "ESP32-S3-Touch-LCD-7",
+        "aka": ["ESP32-S3-Touch-LCD-7 or -5"],
         "since": "v0.1.3",
-        "description": "Waveshare 800x480 panel, 7\" or 5\" (16MB flash, 8MB "
-                       "PSRAM). Runs the dark theme. Not the 5B, which is "
-                       "1024x600.",
+        "description": "Waveshare 7\" 800x480 panel (16MB flash, 8MB PSRAM). "
+                       "Runs the dark theme. Not the 5, which has square "
+                       "pixels, and not the 5B, which is 1024x600.",
         "env": "waveshare-7",
         "app": ("%s-firmware-800x480" % MCU, "firmware-800x480.bin"),
         "bootloader": ("%s-bootloader" % MCU, "bootloader.bin"),
+        "partitions": PARTITIONS_16MB,
+    },
+    {
+        # The Waveshare ESP32-S3-Touch-LCD-5: the same 800x480 panel config as
+        # the 7 at a 5" diagonal, which makes its pixels square -- ~0.135 mm in
+        # both axes -- so it must NOT get the 7's correction. `waveshare-5`
+        # deliberately omits BOARD_WAVESHARE_7 and lands on
+        # TH_PX_ASPECT_X1000 = 1000.
+        #
+        # UNTESTED on hardware, and shipped anyway because the alternative is
+        # worse: through v0.1.6-rc2 no release carried this image at all, so a
+        # 5 owner installed the 7's and drew circles 7.6% out of round. If they
+        # are still not round on a real 5, theme.h TH_PX_ASPECT_X1000 is the
+        # first thing to check.
+        #
+        # Own bootloader rather than the 7's -- see the note above OTADATA.
+        "name": "ESP32-S3-Touch-LCD-5",
+        "since": "v0.1.6-rc3",
+        "description": "Waveshare 5\" 800x480 panel (16MB flash, 8MB PSRAM). "
+                       "Runs the dark theme. Not the 5B, which is 1024x600.",
+        "env": "waveshare-5",
+        "app": ("%s-firmware-800x480-5" % MCU, "firmware-800x480-5.bin"),
+        "bootloader": ("%s-bootloader-waveshare-5" % MCU,
+                       "bootloader-waveshare-5.bin"),
         "partitions": PARTITIONS_16MB,
     },
     {
@@ -139,8 +177,9 @@ BOARDS = [
 # not a build problem -- the waveshare-5b envs still exist and still build, and
 # the theme tokens and Browse grid are still per-panel -- it is a PRODUCT
 # decision: the web installer has never offered it (SUPPORTED_BOARDS in
-# dune-weaver-website filters to the CrowPanels), so no release since v0.1.5
-# has been installable on one anyway.
+# dune-weaver-website names the two CrowPanels and the two Waveshare 800x480
+# panels, and not this one), so no release since v0.1.5 has been installable
+# on one anyway.
 #
 # The consequence to know: ota.c on a 5B still pulls releases/<tag>/
 # firmware.bin, which no longer exists, so its update check 404s. That fails
@@ -175,6 +214,24 @@ KNOWN_BROKEN = {
 }
 
 
+def board_names(board):
+    """Every name a release may legitimately offer this board under: the
+    current one, then any it shipped under before.
+
+    `name` does two jobs -- the label the installer shows, and the identity
+    check_release matches a published manifest against -- and those disagree
+    the moment a panel is renamed. A published release cannot be edited, so
+    renaming without recording the old name turns every release that offered
+    it red, retroactively and forever. That is the same trap `since` exists
+    for, from the other direction: `since` forgives a board a release predates,
+    `aka` forgives a board a release spelled differently.
+
+    Only used for CHECKING. build_manifest never emits an old name, so nothing
+    new is ever published under one.
+    """
+    return [board["name"]] + list(board.get("aka", ()))
+
+
 def board_images(board):
     """[(manifest key, offset, staged filename)] a fresh install writes for one
     board, in flash order with the app last. This is the single place that says
@@ -190,7 +247,7 @@ def board_images(board):
 
 def shared_images_for(board):
     """The manifest keys a fresh install writes BESIDE the app image. Every one
-    is per board now: bootloaders differ on all three boards, and the 4 MB
+    is per board now: every board carries its own bootloader, and the 4 MB
     CrowPanel 7.0 needs its own partition table too. Only otadata is common."""
     return [key for key, _, _ in board_images(board)
             if key != board["app"][0]]

@@ -1,11 +1,21 @@
 # Releasing
 
-Dune Weaver Touch ships **three boards from one tree**: `waveshare-7` (the
-Waveshare 5 and 7, 800×480), `crowpanel-adv-5` (Elecrow CrowPanel Advance 5.0)
+Dune Weaver Touch ships **four boards from one tree**: `waveshare-7` and
+`waveshare-5` (the Waveshare 800×480 panels — same panel config, but only the
+7 has non-square pixels), `crowpanel-adv-5` (Elecrow CrowPanel Advance 5.0)
 and `crowpanel-7` (the original Elecrow CrowPanel 7.0-HMI, the only 4 MB
-board). Every release carries an app image and a bootloader for each — those
-differ on all three — plus a partition table (`partitions.csv` for the 16 MB
-boards, `partitions-4mb.csv` for the 7.0-HMI) and one otadata they all share.
+board). Every release carries an app image and a bootloader for each — the
+bootloader is per board on all four, because even where two envs build
+identical bootloader *code* the embedded build timestamp makes the bytes
+differ — plus a partition table (`partitions.csv` for the 16 MB boards,
+`partitions-4mb.csv` for the 7.0-HMI) and one otadata they all share.
+
+The Waveshare **5** got its own image in v0.1.6-rc3. Before that it was folded
+into the 7's board entry, named "ESP32-S3-Touch-LCD-7 or -5", and a 5 owner
+installed the 7's 7.6% aspect correction onto square pixels. Renaming that
+entry is why `BOARDS` has an **`aka`** field: published manifests still offer
+the old name and cannot be edited, so `check_release` accepts any name a board
+has shipped under. `build_manifest` never emits one.
 
 The Waveshare **5B** (1024×600, `firmware.bin`) was dropped in v0.1.6-rc2:
 the web installer has never offered it, so no release since v0.1.5 was

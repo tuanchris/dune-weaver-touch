@@ -26,14 +26,21 @@ doubt, read the QML source — do not invent behavior.
   `BOARD_WAVESHARE_7` says ONLY that the glass has non-square pixels. The 5 and
   the 7 share the first; only the 7 sets the second. Do not re-merge them: a 5"
   800x480 panel is ~0.135 mm square pixels and would be visibly over-corrected.
-- **Releases carry three boards**, each with its OWN app image AND bootloader
-  (measured: the bootloaders differ on all three): `firmware-800x480.bin` for
-  the Waveshare 5/7, `firmware-crowpanel-adv-5.bin` for the CrowPanel Advance
-  5.0, `firmware-crowpanel-7.bin` for the original CrowPanel 7.0-HMI. The 7.0
-  is the only 4 MB board, so it also carries `partitions-4mb.bin`; the other
-  two share `partitions.bin`, and all three share one otadata. `ota.c` picks
-  its image by board macro, and the manifest offers all three as a `Board`
-  choice so the web installer can ask — every board is esp32s3 with the same
+- **Releases carry four boards**, each with its OWN app image AND bootloader:
+  `firmware-800x480.bin` for the Waveshare 7, `firmware-800x480-5.bin` for the
+  Waveshare 5 (its own image since v0.1.6-rc3 — before that it installed the
+  7's and got an aspect correction its square pixels do not want),
+  `firmware-crowpanel-adv-5.bin` for the CrowPanel Advance 5.0, and
+  `firmware-crowpanel-7.bin` for the original CrowPanel 7.0-HMI. The
+  bootloader is per board on all four: on the CrowPanels the bytes genuinely
+  differ, and on the two Waveshare envs the code is identical but
+  `esp_bootloader_desc_t` embeds the build timestamp, so two envs built
+  minutes apart never hash the same and `build_release.py` refuses to stage
+  one over the other. The 7.0 is the only 4 MB board, so it also carries
+  `partitions-4mb.bin`; the other three share `partitions.bin`, and all four
+  share one otadata. `ota.c` picks its image by board macro, and the manifest
+  offers all four as a `Board` choice so the web installer can ask — every
+  board is esp32s3 with the same
   USB bridge, so nothing on the wire distinguishes them and a shared image
   would flash the wrong geometry (or, on the 7.0, a 16 MB header onto 4 MB
   flash: a reboot loop in flash init). A missing image 404s, which fails safe

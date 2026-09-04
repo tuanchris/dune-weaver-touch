@@ -150,7 +150,10 @@ def check(path):
     ver = spec.version_key(version)
     boards = [b for b in spec.BOARDS if ver and ver >= spec.version_key(b["since"])]
     for board in boards:
-        if board["name"] not in offered:
+        # Any name this board has ever shipped under counts: a rename must
+        # not fail the published releases that offer the old one, which cannot
+        # be edited. See release_spec.board_names.
+        if not any(name in offered for name in spec.board_names(board)):
             bad("board %r is not offered by the manifest" % board["name"])
             continue
         # Not just the app: a board is its bootloader and partition table too,
