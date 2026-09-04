@@ -188,11 +188,33 @@ it does NOT set `BOARD_WAVESHARE_7`. Pin map from Elecrow's factory code
   Buy refresh back with PORCHES, never with PCLK.
 - **Backlight is an STC8H1K28 at I2C 0x30 and the byte is inverted between
   revisions**: v1.1 is `0x05`(off)..`0x10`(max), **v1.2+ is `0`(brightest)..
-  `245`(off)**. Getting it backwards fails silently -- the screen just never
-  goes dark on sleep. `STC8_BL_V11` in board_crowpanel5.c flips it. Because
-  this is a real brightness control, sleep can DIM instead of cutting the
-  converter (`board_backlight_level`), which is the structural answer to the
-  5B's white-halo artifact.
+  `245`(off)**. This is the ONLY revision-dependent thing on the board --
+  Elecrow's own history says v1.2 changed the buttons and v1.3 an FPC package,
+  with **I/O pins unchanged throughout**, so never go looking for a per-revision
+  pin map. Sending v1.2's `0` to a v1.1 board is OUT OF RANGE, so the panel
+  boots and runs with the glass BLACK -- which reads as a dead board, not as a
+  backlight bug (that is exactly how it reached a customer, 2026-09-03). ON is
+  therefore a LADDER, 9 -> 10 -> 16: Elecrow's v1.1 step list ("0x05..0x09 and
+  0x10") skips 0x0A-0x0F, so it is either hex (max 22) or decimal 5..10 with
+  stray 0x prefixes, and only 6..9 are lit under both readings. Ascending
+  writes let the last legal one win, so the panel ends at max either way and at
+  worst at 9. OFF is a ladder for the same reason, `5 -> 245`: 5 is off on
+  v1.1 and 245 is ignored there, while on v1.2+ 5 is bright for the ~1 ms
+  until 245 blanks it (behind the black sleep shield, so invisible). ORDER
+  MATTERS -- `245 -> 5` ends bright on v1.2+. Do not collapse either ladder to
+  one byte, and do not add a revision flag: both directions work from one image
+  on every revision, which is why board revision appears nowhere in the release
+  spec, the installer or settings. Both ladders assume an unrecognised byte is
+  IGNORED; the one exposure is that v1.1's buzzer/speaker command values are
+  undocumented, so if a v1.1 owner reports a beep on sleep, split
+  `board_backlight` behind a stored revision flag rather than weakening the
+  ladders. DIMMING cannot be made revision-proof the same way -- the encodings
+  run opposite and the bytes lit under both are all ~97% on v1.2+ -- so
+  `board_backlight_level` is v1.2+ only and unused; wire it up only with a
+  stored revision flag.
+- **v1.1 and v1.2+ cannot be told apart over I2C** -- both answer at 0x30 and
+  nothing else differs. Only v1.0 is identifiable, by the TCA9534/PCA9557 at
+  0x18 in the `expander probe:` boot line.
 - **No USB-Serial-JTAG**: GPIO19/20 are the I2S microphone, so the console goes
   out UART0 to an onboard CH340K. `custom_sdkconfig` in platformio.ini sets
   `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` for this env only (via

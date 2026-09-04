@@ -158,28 +158,79 @@ i2c_master_bus_handle_t board_i2c_bus(void)
 // On the STC8 revision this is a real brightness control, so "on" means full.
 // screen_sleep can dim instead of switching, which is what keeps the backlight
 // converter from power-cycling -- the white-halo trigger on the Waveshare 5B.
-// The STC8 takes a brightness byte, and the two board revisions define it
-// OPPOSITE ways (Elecrow's wiki):
-//   v1.1    0x05..0x10, where 0x05 is OFF and 0x10 is maximum
-//   v1.2+   0..245,     where 0 is BRIGHTEST and 245 is OFF
-// Getting this backwards does not fail loudly -- it just never turns the
-// backlight off, which looks like "the screensaver leaves the screen on".
-// Default is v1.2+; flip STC8_BL_V11 if the panel does not go dark on sleep.
-#define STC8_BL_V11 0
+//
+// The STC8 takes a brightness byte, and the board revisions define it OPPOSITE
+// ways (Elecrow's own 5.0 wiki, re-checked 2026-09-03):
+//   v1.1    0x05 is OFF, and up from there is brighter (see the ladder note).
+//   v1.2+   0..245, where 0 is BRIGHTEST, 244 dimmest and 245 OFF.
+// So v1.2's "on" (0) is out of range on v1.1, and a firmware built for v1.2
+// NEVER LIGHTS A v1.1 PANEL: the board boots, LVGL runs, touch works, and the
+// glass stays black -- which reads as a dead board, and did, to a customer on
+// 2026-09-03. That is the whole of the v1.1 incompatibility; nothing else
+// about this board is revision-dependent (Elecrow: v1.2 changed the buttons,
+// v1.3 an FPC package; I/O pins unchanged throughout).
+//
+// Which revision a board is shows in the boot log's `expander probe:` line
+// only for v1.0 (TCA9534/PCA9557 @ 0x18, no STC8); v1.1 and v1.2+ both answer
+// at 0x30 and are indistinguishable over I2C -- so the code never asks, and
+// nothing downstream (release spec, installer, settings) carries a revision.
+//
+// v1.1's own step list is ambiguous and BOTH readings have to be satisfied,
+// because the one board we have to get right is a v1.1 we cannot test on.
+// Elecrow writes the steps as "0x05, 0x06, 0x07, 0x08, 0x09 and 0x10" -- which
+// skips 0x0A..0x0F, so either they mean hex and max is 22 decimal, or (far more
+// likely) they counted 5,6,7,8,9,10 in decimal and prefixed every one with 0x.
+// Six steps is what the third-party teardowns report too, which fits 5..10.
+// So the legal set is {5,6,7,8,9,16} under one reading and {5,6,7,8,9,10}
+// under the other, and their only shared lit values are 6..9.
+//
+// Hence LADDERS rather than single bytes, in both directions. Write ascending
+// (or descending) through the candidates: the last write the firmware ACCEPTS
+// wins, and one it does not recognise is ignored, so the panel lands on the
+// right end under either encoding from ONE image. That is what keeps board
+// revision out of the release spec, out of the installer, and out of settings.
+//
+//   ON   9 -> 10 -> 16   v1.1: 9, then max under whichever reading is real
+//                        (9 -> 10 -> ignored, or 9 -> ignored -> 16), so never
+//                        below 9. v1.2+: all legal, lands on 16, ~94% duty --
+//                        invisible, and the price of one image.
+//   OFF  5 -> 245        v1.1: 5 is OFF, 245 is out of range and ignored.
+//                        v1.2+: 5 is ~98% bright for the ~1 ms until 245 lands
+//                        and blanks it -- and screen_sleep has already drawn
+//                        its black shield by then, so the flash is of a black
+//                        frame. Order matters: 245 then 5 would end BRIGHT on
+//                        v1.2+.
+//
+// Both ladders assume an unrecognised byte is ignored rather than acted on.
+// The one place that could bite is OFF: v1.1 changed the buzzer/speaker
+// commands and their values are undocumented, so if 245 collides with one, a
+// v1.1 panel beeps when it sleeps. Harmless and obvious -- if a v1.1 owner
+// reports that, split board_backlight into the two encodings behind a stored
+// revision flag rather than weakening the ladders.
+//   v1.1    0x05 off .. max per the reading above
+//   v1.2+   0 brightest .. 244 dimmest, 245 off; 246/247 buzzer, 248/249 spk
+static const uint8_t STC8_BL_ON_LADDER[] = {9, 10, 16};
+static const uint8_t STC8_BL_OFF_LADDER[] = {5, 245};
 
-#if STC8_BL_V11
-#define STC8_BL_OFF 0x05
-#define STC8_BL_MAX 0x10
-#else
-#define STC8_BL_OFF 245
-#define STC8_BL_MAX 0
-#endif
+static esp_err_t stc8_ladder(const uint8_t *bytes, size_t n)
+{
+    esp_err_t err = ESP_OK;
+    for (size_t i = 0; i < n; i++) {
+        // Keep going on error: a NACK here is the likely signature of an
+        // out-of-range byte, which is exactly the case the ladder exists for.
+        const esp_err_t one = i2c_master_transmit(s_stc8, &bytes[i], 1, 100);
+        if (one != ESP_OK) {
+            err = one;
+        }
+    }
+    return err;
+}
 
 esp_err_t board_backlight(bool on)
 {
     if (s_stc8 != NULL) {
-        const uint8_t val = on ? STC8_BL_MAX : STC8_BL_OFF;
-        return i2c_master_transmit(s_stc8, &val, 1, 100);
+        return on ? stc8_ladder(STC8_BL_ON_LADDER, sizeof(STC8_BL_ON_LADDER))
+                  : stc8_ladder(STC8_BL_OFF_LADDER, sizeof(STC8_BL_OFF_LADDER));
     }
     return exp_update(on ? EXP_BIT_BL : 0, on ? 0 : EXP_BIT_BL);
 }
@@ -188,16 +239,25 @@ esp_err_t board_backlight(bool on)
 // the TCA9534 it degrades to on/off at the midpoint. This is what lets sleep
 // DIM rather than cut the backlight converter -- the mechanism behind the
 // Waveshare 5B's white-halo artifact.
+//
+// Unlike on/off, DIMMING cannot be made revision-proof: the two encodings run
+// opposite directions, and the bytes that are lit under both (6..9) are all
+// ~97% brightness on v1.2+, so there is no shared range to dim across. This
+// is therefore the v1.2+ scheme, and on a v1.1 board every level but the
+// endpoints is out of range and ignored, leaving the backlight where
+// board_backlight left it. Nothing calls this yet; wire it up only together
+// with a stored revision flag.
 esp_err_t board_backlight_level(uint8_t level)
 {
     if (s_stc8 == NULL) {
         return board_backlight(level >= 128);
     }
-#if STC8_BL_V11
-    const uint8_t val = level == 0 ? 0x05 : (uint8_t)(0x05 + (level * 11) / 255);
-#else
-    const uint8_t val = (uint8_t)(245 - (level * 245) / 255);
-#endif
+    if (level == 0) {
+        return board_backlight(false);
+    }
+    // Never brighter than the ON ladder's top, so a v1.1 board still gets a
+    // byte it can act on at full level rather than a dark screen.
+    const uint8_t val = (uint8_t)(245 - ((uint32_t)level * (245 - 16)) / 255);
     return i2c_master_transmit(s_stc8, &val, 1, 100);
 }
 
