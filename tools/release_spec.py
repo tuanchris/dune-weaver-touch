@@ -12,128 +12,193 @@
 
 PROJECT = "dune-weaver-touch"
 REPO = "https://github.com/tuanchris/" + PROJECT
-
-# The RELEASE env, deliberately not "waveshare-5b": that one carries
-# -DUI_DEBUG_RGB_STOP (the unmeasured sleep-panel-reset experiment) and must
-# never ship. See platformio.ini.
-ENV = "waveshare-5b-release"
-# Second app image, for the 800x480 boards (the 5 and the 7). ota.c fetches
-# firmware-800x480.bin on those, and the manifest offers it as the second Board
-# choice, so a release without it leaves those panels unable to install OR
-# update -- and one that named it firmware.bin would flash a 1024x600 build
-# onto them.
-ENV_800X480 = "waveshare-7"
-IMAGE_800X480 = "firmware-800x480.bin"
-# Third app image, for the Elecrow CrowPanel Advance 5.0. It is 800x480 too but
-# a DIFFERENT BOARD -- own pin map, own expander, own console -- so it cannot
-# share the Waveshare image; ota.c selects by board, never by resolution.
-#
-# It also needs its OWN bootloader, unlike the 5/7: this board has no
-# USB-Serial-JTAG (GPIO19/20 are the I2S mic), so its console is UART0 and
-# CONFIG_ESP_CONSOLE_* differs, which changes the bootloader bytes. Measured
-# 2026-09-02: bootloader.bin DIFFERS from the 5B's, partitions.bin and
-# ota_data_initial.bin are byte-identical and stay shared.
-ENV_CROWPANEL = "crowpanel-adv-5"
-IMAGE_CROWPANEL = "firmware-crowpanel-adv-5.bin"
-BOOTLOADER_CROWPANEL = "bootloader-crowpanel-adv-5.bin"
 MCU = "esp32s3"
 
-# The offsets esptool writes each image to on a fresh install. These are NOT the
-# generic ESP32 ones: the S3 boots its bootloader from 0x0, not 0x1000. Getting
-# this wrong produces a board that flashes cleanly and then will not boot.
-# Mirrored from .pio/build/<env>/flasher_args.json -- if the partition table
+# The offsets esptool writes to on a fresh install. These are NOT the generic
+# ESP32 ones: the S3 boots its bootloader from 0x0, not 0x1000. Getting this
+# wrong produces a board that flashes cleanly and then will not boot.
+# Mirrored from .pio/build/<env>/flasher_args.json -- if a partition table
 # moves, re-read that file rather than editing these from memory.
-IMAGES = [
-    # name,         offset,     source filename in .pio/build/<env>/
-    ("bootloader", "0x0", "bootloader.bin"),
-    ("partitions", "0x8000", "partitions.bin"),
-    # otadata decides which slot boots. A fresh install MUST write it: the bytes
-    # already at 0xF000 on a panel coming off the old factory-only table are the
-    # tail of its phy_init partition, and a stale/garbage otadata is how you get
-    # a board that flashes cleanly and boots the wrong slot.
-    ("otadata", "0xF000", "ota_data_initial.bin"),
-    # 0x20000, NOT the 0x10000 you remember: ota_0 starts at the first 64 KB
-    # boundary above otadata. See partitions.csv.
-    ("firmware", "0x20000", "firmware.bin"),
-]
-
-# Where the app image goes, read back out of IMAGES so the 800x480 image cannot
-# drift from the 5B's.
-APP_OFFSET = dict((name, offset) for name, offset, _ in IMAGES)["firmware"]
-
-# The two panels the release ships an app image for. Nothing on the wire tells
-# them apart -- same MCU, same USB bridge, same GPIO map -- so the web
-# installer has to ASK, which is why both appear as a "Board" choice rather
-# than being resolved here. Flashing the wrong one leaves a panel that boots
-# and is unreadable.
 #
-# Only the app image differs. Bootloader, partition table and otadata are taken
-# from the 5B build and shared: sdkconfig.waveshare-5b and
-# sdkconfig.waveshare-7 are identical (the panel is chosen by build_flags in
-# platformio.ini, not by sdkconfig), and partitions.csv is common, so those
-# three are the same bytes either way.
+# 0x20000, NOT the 0x10000 you remember: ota_0 starts at the first 64 KB
+# boundary above otadata. partitions-4mb.csv keeps nvs, otadata and ota_0 at
+# these same offsets on purpose, so only the TABLE differs on a 4 MB board and
+# nothing here becomes per-board.
+BOOTLOADER_OFFSET = "0x0"
+PARTITIONS_OFFSET = "0x8000"
+# otadata decides which slot boots. A fresh install MUST write it: the bytes
+# already at 0xF000 on a panel coming off the old factory-only table are the
+# tail of its phy_init partition, and a stale/garbage otadata is how you get a
+# board that flashes cleanly and boots the wrong slot.
+OTADATA_OFFSET = "0xF000"
+APP_OFFSET = "0x20000"
+
+# Built once and shared by every board. MEASURED, not assumed (2026-09-04):
+# ota_data_initial.bin is byte-identical across waveshare-7, crowpanel-adv-5
+# and crowpanel-7. The other two are not, which is why they live per board:
+#   bootloader   differs on ALL THREE -- console config and, on the 7.0-HMI,
+#                the 4 MB flash size in the image header
+#   partitions   waveshare-7 == crowpanel-adv-5; crowpanel-7 differs (4 MB)
+# Re-measure before sharing anything else here; the last time this was assumed
+# rather than checked, a release shipped an image nobody could install.
+OTADATA = ("%s-otadata" % MCU, "ota_data_initial.bin")
+# The 16 MB table, shared by every board that is not the 4 MB CrowPanel 7.0.
+PARTITIONS_16MB = ("%s-partitions" % MCU, "partitions.bin")
+
+def version_key(version):
+    """A sortable key for "v0.1.6-rc2", "0.1.6" or "v0.1.3", ordering a
+    prerelease BEFORE the release it precedes and rc1 before rc2.
+
+    A plain (0, 1, 6) tuple cannot do this -- it makes v0.1.6-rc1 and v0.1.6
+    equal -- and that is not academic: BOARDS["since"] has to be able to say
+    "from v0.1.6-rc2", because v0.1.6-rc1 is already published without the
+    board. Without the ordering the only way to add a board is to skip a
+    version number, which is a worse answer than parsing the suffix.
+
+    (ota.c's version_cmp deliberately does the OPPOSITE and treats -rc1 as
+    equal to the release, so a tester is never offered a downgrade. Different
+    question, different rule.)
+    """
+    text = str(version).lstrip("vV")
+    core, _, suffix = text.partition("-")
+    try:
+        parts = tuple(int(part) for part in core.split("."))
+    except ValueError:
+        return ()
+    if not suffix:
+        return (parts, 1, 0)  # a final release outranks all its prereleases
+    digits = "".join(c for c in suffix if c.isdigit())
+    return (parts, 0, int(digits) if digits else 0)
+
+
+# The panels a release ships an app image for. Nothing on the wire tells them
+# apart -- same MCU, same USB bridge -- so the web installer has to ASK, which
+# is why each appears as a "Board" choice rather than being resolved here.
+# Flashing the wrong one leaves a panel that boots and is unreadable.
+#
+# Board REVISIONS are deliberately absent. They are resolved on the device (the
+# CrowPanel Advance probes its expander, and its backlight ladders land
+# correctly under either v1.1 or v1.2+ encoding), never by asking the user, who
+# mostly does not know what revision they own. Add a board here only when the
+# IMAGE differs; if the difference can be resolved at runtime, resolve it there.
+#
+# Each board names the env it builds from and the files that env contributes.
+# `bootloader` and `partitions` default to nothing shared -- a board must say
+# which it uses, because getting a bootloader from the wrong env is silent.
 BOARDS = [
     {
-        "name": "ESP32-S3-Touch-LCD-5B",
-        "description": "Waveshare 5\" 1024x600 panel (16MB flash, 8MB PSRAM). "
-                       "Runs the light theme, because this panel flickers in "
-                       "mid-greys.",
-        "image": "%s-firmware" % MCU,
-    },
-    {
         # ONE image for both: they differ only in whether the glass has square
-        # pixels, and this is the 7's build (ENV_800X480), so a 5 gets the 7's
-        # 7.6% aspect correction. The 5 is untested hardware; revisit when one
-        # is measured, and until then it beats a 1024x600 build.
+        # pixels, and this is the 7's build, so a 5 gets the 7's 7.6% aspect
+        # correction. The 5 is untested hardware; revisit when one is measured,
+        # and until then it beats a 1024x600 build.
         "name": "ESP32-S3-Touch-LCD-7 or -5",
+        "since": "v0.1.3",
         "description": "Waveshare 800x480 panel, 7\" or 5\" (16MB flash, 8MB "
                        "PSRAM). Runs the dark theme. Not the 5B, which is "
                        "1024x600.",
-        "image": "%s-firmware-800x480" % MCU,
+        "env": "waveshare-7",
+        "app": ("%s-firmware-800x480" % MCU, "firmware-800x480.bin"),
+        "bootloader": ("%s-bootloader" % MCU, "bootloader.bin"),
+        "partitions": PARTITIONS_16MB,
     },
     {
         "name": "Elecrow CrowPanel Advance 5.0-HMI",
+        "since": "v0.1.5",
         "description": "Elecrow 5\" 800x480 panel (16MB flash, 8MB PSRAM). "
                        "Runs the dark theme. Set the Function Select DIP to "
                        "1 1 (both ON) or the TF card will not be detected.",
-        "image": "%s-firmware-crowpanel-adv-5" % MCU,
-        # Own bootloader; see BOOTLOADER_CROWPANEL above.
-        "bootloader": "%s-bootloader-crowpanel-adv-5" % MCU,
+        "env": "crowpanel-adv-5",
+        "app": ("%s-firmware-crowpanel-adv-5" % MCU,
+                "firmware-crowpanel-adv-5.bin"),
+        # Own bootloader: no USB-Serial-JTAG (GPIO19/20 are the I2S mic), so
+        # the console is UART0 and CONFIG_ESP_CONSOLE_* changes the bytes.
+        "bootloader": ("%s-bootloader-crowpanel-adv-5" % MCU,
+                       "bootloader-crowpanel-adv-5.bin"),
+        "partitions": PARTITIONS_16MB,
+    },
+    {
+        # The ORIGINAL CrowPanel 7.0 (DIS07070H), not the Advance series and
+        # not the Waveshare 7. The only 4 MB board: a 16 MB image header
+        # asserts in flash init and reboot-loops, so its partition table AND
+        # bootloader are its own. That is the whole reason this spec grew a
+        # per-board partition table.
+        "name": "Elecrow CrowPanel 7.0-HMI",
+        "since": "v0.1.6-rc2",
+        "description": "Elecrow 7\" 800x480 panel, the original HMI series "
+                       "(4MB flash, 8MB PSRAM). Runs the dark theme. Not the "
+                       "CrowPanel Advance, which is a different board.",
+        "env": "crowpanel-7",
+        "app": ("%s-firmware-crowpanel-7" % MCU, "firmware-crowpanel-7.bin"),
+        "bootloader": ("%s-bootloader-crowpanel-7" % MCU,
+                       "bootloader-crowpanel-7.bin"),
+        "partitions": ("%s-partitions-4mb" % MCU, "partitions-4mb.bin"),
     },
 ]
 
-# The first release that shipped an 800x480 image. Everything before it is
-# genuinely single-board and can never be fixed -- the bytes were never built --
-# so check_release.py holds those to its integrity rules only, not to BOARDS.
-MULTI_BOARD_SINCE = (0, 1, 3)
+# The Waveshare 5B (1024x600, firmware.bin) was dropped in v0.1.6-rc2. It is
+# not a build problem -- the waveshare-5b envs still exist and still build, and
+# the theme tokens and Browse grid are still per-panel -- it is a PRODUCT
+# decision: the web installer has never offered it (SUPPORTED_BOARDS in
+# dune-weaver-website filters to the CrowPanels), so no release since v0.1.5
+# has been installable on one anyway.
+#
+# The consequence to know: ota.c on a 5B still pulls releases/<tag>/
+# firmware.bin, which no longer exists, so its update check 404s. That fails
+# SAFE -- the panel keeps running what it has and reports the update failed --
+# but a 5B in the field can no longer update itself. Put the board back here
+# and the image returns; nothing else has to change.
+
+# Each board's "since" is the release that FIRST offered it, and check_release
+# requires a board only of releases at or after it. Without that, adding a
+# board retroactively breaks every older release: v0.1.5 added the CrowPanel
+# Advance and turned check-releases.yml red on v0.1.3 and v0.1.4, where it
+# stayed for two releases because only the Release workflow was being watched.
+# A published release cannot grow a board it never built, so demanding one is
+# a bug in the check, not a finding.
+#
+# Releases before the first "since" are genuinely single-board and are held to
+# the integrity rules only.
+MULTI_BOARD_SINCE = min((b["since"] for b in BOARDS), key=version_key)
+
+# Published releases with defects that CANNOT be fixed -- the bytes are on
+# GitHub and panels have installed them. Recorded, reported, and not failed, so
+# CI stays a signal about releases we can still affect rather than a permanent
+# red that everyone learns to scroll past. Only add to this after confirming
+# the release is genuinely unfixable; a staged release is never known-broken.
+KNOWN_BROKEN = {
+    # Its manifest offers a single board called "esp32s3" and never references
+    # the firmware-800x480.bin staged beside it -- the v0.1.3 bug, repeated one
+    # release later, before the spec existed to catch it. 800x480 owners could
+    # not install v0.1.4 at all; v0.1.5 is their next working release.
+    "v0.1.4": "manifest offers one board and omits firmware-800x480.bin "
+              "(the v0.1.3 defect, repeated); unfixable, superseded by v0.1.5",
+}
 
 
-def version_tuple(version):
-    """(0, 1, 3) from "v0.1.3", "0.1.3" or "v0.1.3-rc1"; () if unparseable."""
-    core = str(version).lstrip("v").split("-")[0]
-    try:
-        return tuple(int(part) for part in core.split("."))
-    except ValueError:
-        return ()
-
-
-# Everything a fresh install writes except the app image, which is per board.
-SHARED_IMAGES = ["%s-%s" % (MCU, name) for name, _, _ in IMAGES
-                 if name != "firmware"]
+def board_images(board):
+    """[(manifest key, offset, staged filename)] a fresh install writes for one
+    board, in flash order with the app last. This is the single place that says
+    what a board is MADE of: build_release stages exactly this, and
+    check_release requires exactly this."""
+    return [
+        (board["bootloader"][0], BOOTLOADER_OFFSET, board["bootloader"][1]),
+        (board["partitions"][0], PARTITIONS_OFFSET, board["partitions"][1]),
+        (OTADATA[0], OTADATA_OFFSET, OTADATA[1]),
+        (board["app"][0], APP_OFFSET, board["app"][1]),
+    ]
 
 
 def shared_images_for(board):
-    """Everything a fresh install writes except the app image. Boards may
-    override the bootloader -- the CrowPanel's differs because its console is
-    UART0 rather than USB-Serial-JTAG."""
-    if "bootloader" not in board:
-        return SHARED_IMAGES
-    return [board["bootloader"] if name.endswith("-bootloader") else name
-            for name in SHARED_IMAGES]
+    """The manifest keys a fresh install writes BESIDE the app image. Every one
+    is per board now: bootloaders differ on all three boards, and the 4 MB
+    CrowPanel 7.0 needs its own partition table too. Only otadata is common."""
+    return [key for key, _, _ in board_images(board)
+            if key != board["app"][0]]
 
 
 def board_choices(board):
-    """The two installation types for one panel, differing only in its app image."""
+    """The two installation types for one panel, differing only in how much of
+    the board they rewrite."""
     return {
         "name": board["name"],
         "description": board["description"],
@@ -144,7 +209,7 @@ def board_choices(board):
                 "description": "Complete install, erasing all previous data "
                                "including saved WiFi credentials.",
                 "erase": True,
-                "images": shared_images_for(board) + [board["image"]],
+                "images": shared_images_for(board) + [board["app"][0]],
             },
             {
                 # NVS is left alone, so the panel comes back on its own WiFi
@@ -156,7 +221,7 @@ def board_choices(board):
                 "description": "Update firmware only, preserving NVS (WiFi "
                                "credentials, table address, screen settings).",
                 "erase": False,
-                "images": ["%s-otadata" % MCU, board["image"]],
+                "images": [OTADATA[0], board["app"][0]],
             },
         ],
     }

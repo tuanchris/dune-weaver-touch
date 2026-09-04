@@ -35,11 +35,7 @@ import release_spec as spec  # noqa: E402
 VERBOSE = "-v" in sys.argv
 PIO = shutil.which("pio") or shutil.which("platformio") or "/opt/homebrew/bin/pio"
 
-ENV = spec.ENV
-ENV_800X480 = spec.ENV_800X480
-IMAGE_800X480 = spec.IMAGE_800X480
 MCU = spec.MCU
-IMAGES = spec.IMAGES
 
 
 def run(cmd):
@@ -82,79 +78,61 @@ except subprocess.CalledProcessError:
     print("WARNING: HEAD is not exactly on tag %s. Tag this commit first to ship\n"
           "         a release whose assets match the tagged source." % tag)
 
-print("Building Dune Weaver Touch release %s (env: %s)\n" % (tag, ENV))
+print("Building Dune Weaver Touch release %s (%d boards)\n"
+      % (tag, len(spec.BOARDS)))
 
 rel_path = os.path.join("release", tag)
 if os.path.exists(rel_path):
     shutil.rmtree(rel_path)
 os.makedirs(rel_path)
 
-run([PIO, "run", "-e", ENV])
-
-build_dir = os.path.join(".pio", "build", ENV)
 manifest_images = {}
 staged = []
 
-for name, offset, src_name in IMAGES:
-    src = os.path.join(build_dir, src_name)
-    if not os.path.exists(src):
-        sys.exit("Missing build artifact: %s" % src)
-    dst = os.path.join(rel_path, src_name)
-    shutil.copyfile(src, dst)
-    staged.append(src_name)
-    manifest_images["%s-%s" % (MCU, name)] = {
-        "size": os.path.getsize(dst),
-        "offset": offset,
-        "path": src_name,
-        "signature": {"algorithm": "SHA2-256", "value": sha256(dst)},
-    }
-    print("  %-14s %8s  %9d B" % (src_name, offset, os.path.getsize(dst)))
+# One pass per board. Each names the env it builds from and every file that
+# env contributes -- app image, bootloader, partition table -- so adding a
+# board is a spec edit, not a new block here. The three hand-written blocks
+# this replaced were what let the CrowPanel 7.0's 4 MB partition table have
+# nowhere to go.
+#
+# A file two boards genuinely share (otadata, and the 16 MB partition table)
+# is staged once: same manifest key, same filename, so the second board's copy
+# is a no-op. It is verified rather than assumed -- if two envs ever produce
+# DIFFERENT bytes under one name, that is exactly the silent mix-up this
+# release path exists to prevent, so it fails here.
+for board in spec.BOARDS:
+    env = board["env"]
+    print("\nBuilding %s (env: %s)\n" % (board["name"], env))
+    run([PIO, "run", "-e", env])
+    build_dir = os.path.join(".pio", "build", env)
 
-# Build and stage the 800x480 image alongside. Two consumers, one file:
-# ota.c fetches it by name on those panels, and the manifest below offers it
-# as the second Board choice so the web installer can write it over USB.
-print("\nBuilding the 800x480 image (env: %s)\n" % ENV_800X480)
-run([PIO, "run", "-e", ENV_800X480])
-src_800 = os.path.join(".pio", "build", ENV_800X480, "firmware.bin")
-if not os.path.exists(src_800):
-    sys.exit("Missing build artifact: %s" % src_800)
-dst_800 = os.path.join(rel_path, IMAGE_800X480)
-shutil.copyfile(src_800, dst_800)
-staged.append(IMAGE_800X480)
-# Same slot as the 5B app image -- it IS the app image, for the other panel.
-manifest_images["%s-firmware-800x480" % MCU] = {
-    "size": os.path.getsize(dst_800),
-    "offset": spec.APP_OFFSET,
-    "path": IMAGE_800X480,
-    "signature": {"algorithm": "SHA2-256", "value": sha256(dst_800)},
-}
-print("  %-14s %8s  %9d B" % (IMAGE_800X480, spec.APP_OFFSET, os.path.getsize(dst_800)))
-
-# Build and stage the CrowPanel Advance 5.0. Two images, not one: it needs its
-# own bootloader (UART0 console rather than USB-Serial-JTAG, which changes the
-# bytes). partitions and otadata are byte-identical to the 5B's and stay shared.
-print("\nBuilding the CrowPanel Advance 5.0 images (env: %s)\n" % spec.ENV_CROWPANEL)
-run([PIO, "run", "-e", spec.ENV_CROWPANEL])
-crow_dir = os.path.join(".pio", "build", spec.ENV_CROWPANEL)
-for src_name, out_name, image_key, offset in (
-        ("firmware.bin", spec.IMAGE_CROWPANEL,
-         "%s-firmware-crowpanel-adv-5" % MCU, spec.APP_OFFSET),
-        ("bootloader.bin", spec.BOOTLOADER_CROWPANEL,
-         "%s-bootloader-crowpanel-adv-5" % MCU, "0x0"),
-):
-    src = os.path.join(crow_dir, src_name)
-    if not os.path.exists(src):
-        sys.exit("Missing build artifact: %s" % src)
-    dst = os.path.join(rel_path, out_name)
-    shutil.copyfile(src, dst)
-    staged.append(out_name)
-    manifest_images[image_key] = {
-        "size": os.path.getsize(dst),
-        "offset": offset,
-        "path": out_name,
-        "signature": {"algorithm": "SHA2-256", "value": sha256(dst)},
-    }
-    print("  %-14s %8s  %9d B" % (out_name, offset, os.path.getsize(dst)))
+    for key, offset, out_name in spec.board_images(board):
+        # The env's own artifact name, which is never the release's: every env
+        # builds "firmware.bin" and "bootloader.bin".
+        src_name = ("firmware.bin" if offset == spec.APP_OFFSET else
+                    "bootloader.bin" if offset == spec.BOOTLOADER_OFFSET else
+                    "partitions.bin" if offset == spec.PARTITIONS_OFFSET else
+                    "ota_data_initial.bin")
+        src = os.path.join(build_dir, src_name)
+        if not os.path.exists(src):
+            sys.exit("Missing build artifact: %s" % src)
+        dst = os.path.join(rel_path, out_name)
+        if os.path.exists(dst):
+            if sha256(dst) != sha256(src):
+                sys.exit("%s: %s and an earlier board both stage %s, with "
+                         "DIFFERENT bytes. One of them would be installed on "
+                         "the wrong panel; give it its own filename in "
+                         "release_spec.BOARDS." % (board["name"], env, out_name))
+            continue
+        shutil.copyfile(src, dst)
+        staged.append(out_name)
+        manifest_images[key] = {
+            "size": os.path.getsize(dst),
+            "offset": offset,
+            "path": out_name,
+            "signature": {"algorithm": "SHA2-256", "value": sha256(dst)},
+        }
+        print("  %-32s %8s  %9d B" % (out_name, offset, os.path.getsize(dst)))
 
 manifest = spec.build_manifest(tag, manifest_images)
 

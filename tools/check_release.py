@@ -144,22 +144,33 @@ def check(path):
     #    the manifest catching up fails here rather than in someone's hands.
     #    Releases older than the second image predate the question.
     offered = set(c.get("name") for c in installable.get("choices", []))
-    boards = (spec.BOARDS
-              if spec.version_tuple(version) >= spec.MULTI_BOARD_SINCE
-              else [])
+    # Per BOARD, not one global cutoff: a release cannot offer a panel that did
+    # not exist when it was built, so requiring one is a bug in this check
+    # rather than a finding. See release_spec.BOARDS["since"].
+    ver = spec.version_key(version)
+    boards = [b for b in spec.BOARDS if ver and ver >= spec.version_key(b["since"])]
     for board in boards:
         if board["name"] not in offered:
             bad("board %r is not offered by the manifest" % board["name"])
-        elif board["image"] not in images:
-            bad("board %r needs image %s, which the release does not have"
-                % (board["name"], board["image"]))
+            continue
+        # Not just the app: a board is its bootloader and partition table too,
+        # and those are per board now. The CrowPanel 7.0 is 4 MB, so a release
+        # carrying its app image against the 16 MB table would flash cleanly
+        # and reboot-loop in flash init -- unreadable, and blamed on the board.
+        for key, offset, _ in spec.board_images(board):
+            if key not in images:
+                bad("board %r needs image %s, which the release does not have"
+                    % (board["name"], key))
+            elif images[key].get("offset") != offset:
+                bad("board %r writes %s at %s, manifest says %s"
+                    % (board["name"], key, offset, images[key].get("offset")))
 
     # 6. The panels must not share one binary. If both app images are the same
     #    bytes, one env did not rebuild and half the panels get the wrong
     #    geometry -- the exact failure the second image exists to prevent.
     digests = {}
     for board in boards:
-        image = images.get(board["image"])
+        image = images.get(board["app"][0])
         blob_path = image and os.path.join(path, image.get("path", ""))
         if blob_path and os.path.exists(blob_path):
             digests.setdefault(
@@ -182,6 +193,13 @@ def main(argv):
             problems.append("%s: not a directory" % path)
             continue
         found = check(path)
+        known = spec.KNOWN_BROKEN.get(os.path.basename(path))
+        if known and found:
+            # Published and unfixable: say so every run, but do not fail on it.
+            print("%-24s KNOWN BROKEN (%s)" % (path, known))
+            for line in found:
+                print("      %s" % line)
+            continue
         problems += found
         print("%-24s %s" % (path, "OK" if not found else
                             "%d problem(s)" % len(found)))

@@ -33,7 +33,9 @@
 // map, expander and console. Selecting by panel resolution would have it pull
 // the Waveshare 7 build and flash a foreign pin map onto itself. The image is
 // per BOARD, never per panel. A release without this file 404s, which fails
-// the update cleanly.
+// the update cleanly -- which is exactly what a Waveshare 5B now gets: that
+// board left release_spec.BOARDS in v0.1.6-rc2, so firmware.bin below is no
+// longer published and a 5B can no longer update itself.
 #define GH_IMAGE_FMT "https://raw.githubusercontent.com/tuanchris/dune-weaver-touch/main/releases/%s/firmware-crowpanel-adv-5.bin"
 #elif defined(BOARD_CROWPANEL_7)
 // Same rule for the original CrowPanel 7.0: its own board, its own image --

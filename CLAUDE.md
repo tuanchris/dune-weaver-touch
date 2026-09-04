@@ -26,22 +26,43 @@ doubt, read the QML source — do not invent behavior.
   `BOARD_WAVESHARE_7` says ONLY that the glass has non-square pixels. The 5 and
   the 7 share the first; only the 7 sets the second. Do not re-merge them: a 5"
   800x480 panel is ~0.135 mm square pixels and would be visibly over-corrected.
-- **Releases carry two images.** `firmware.bin` is the 5B (unchanged, so panels
-  in the field keep updating) and `firmware-800x480.bin` is the 5/7; `ota.c`
-  picks by `BOARD_PANEL_800X480`, and the manifest offers both as a `Board`
-  choice so the web installer can ask. Both boards are esp32s3 and nothing else
-  distinguishes them, so a single image would let an 800x480 panel flash a
-  1024x600 build. A missing image 404s, which fails safe — a manifest that
-  omits one does NOT, which is how v0.1.3 shipped with the 800x480 image
-  present and uninstallable.
-- **`tools/release_spec.py` declares what a release is** (envs, images,
-  offsets, the `Board` → `Installation type` tree); `build_release.py` builds
-  against it and `tools/check_release.py` verifies against it. Add a panel
-  there, in `BOARDS`, and the check fails until the manifest offers it. Never
-  hard-code an offset or an image name anywhere else, and never publish past
-  a `check_release` failure — it runs in `build_release.py`, in the release
-  workflow after the artifacts are committed, and in `check-releases.yml` on
-  every push touching `releases/`. See RELEASING.md.
+- **Releases carry three boards**, each with its OWN app image AND bootloader
+  (measured: the bootloaders differ on all three): `firmware-800x480.bin` for
+  the Waveshare 5/7, `firmware-crowpanel-adv-5.bin` for the CrowPanel Advance
+  5.0, `firmware-crowpanel-7.bin` for the original CrowPanel 7.0-HMI. The 7.0
+  is the only 4 MB board, so it also carries `partitions-4mb.bin`; the other
+  two share `partitions.bin`, and all three share one otadata. `ota.c` picks
+  its image by board macro, and the manifest offers all three as a `Board`
+  choice so the web installer can ask — every board is esp32s3 with the same
+  USB bridge, so nothing on the wire distinguishes them and a shared image
+  would flash the wrong geometry (or, on the 7.0, a 16 MB header onto 4 MB
+  flash: a reboot loop in flash init). A missing image 404s, which fails safe
+  — a manifest that omits one does NOT, which is how v0.1.3 AND v0.1.4 shipped
+  with the 800x480 image present and uninstallable.
+- **The Waveshare 5B was dropped in v0.1.6-rc2.** Its envs still build; it
+  is simply not in `BOARDS`, because the web installer never offered it. A 5B
+  in the field 404s its update check, which fails safe. Put it back in `BOARDS`
+  and the image returns — nothing else changes.
+- **Board REVISIONS never become a release choice.** They are resolved on the
+  device (the CrowPanel Advance probes its expander; its backlight ladders land
+  correctly under either the v1.1 or v1.2+ encoding). Add a `Board` only when
+  the IMAGE differs; users mostly do not know what revision they own, and a
+  wrong pick flashes cleanly and boots unreadable.
+- **`tools/release_spec.py` declares what a release is** (per board: its env,
+  app image, bootloader, partition table, and the `since` release that first
+  offered it — a version string ordered by `version_key()`, which sorts a
+  prerelease before its final release so a board added in rc2 does not fail
+  the rc1 already published); `board_images()` is the one place that says what a board is made
+  of, and `build_release.py` stages exactly that while `tools/check_release.py`
+  requires exactly that. Adding a board is a spec edit, not a new block in the
+  builder. Never hard-code an offset or an image name anywhere else, and never
+  publish past a `check_release` failure — it runs in `build_release.py`, in
+  the release workflow after the artifacts are committed, and in
+  `check-releases.yml` on every push touching `releases/`. **Watch BOTH
+  workflows after a tag**: `check-releases.yml` sat red from v0.1.5 to
+  v0.1.6-rc1 because adding a board without a per-board `since` failed every
+  older release retroactively, and only Release was being watched. See
+  RELEASING.md.
 - Build: `pio run -e waveshare-5b` (or `-e waveshare-7`) · Flash: add `-t upload`
   · Monitor: `pio device monitor -e <env>`. Bare `pio run` builds BOTH envs.
 - OTA (same contract as dune-weaver-firmware, `src/net/ota.c`): the panel RUNS
@@ -288,10 +309,13 @@ card, sleep dimming.
   but measure for drift first.
 - Same 7" 800x480 glass geometry as the Waveshare 7, so the env sets
   `BOARD_WAVESHARE_7` (theme.h aspect correction only).
-- **Not in `tools/release_spec.py`.** It needs its own bootloader, partition
-  table and app image, and the spec has no per-board partition table. `ota.c`
-  names `firmware-crowpanel-7.bin`, which 404s (fails safe) until a release
-  carries it.
+- **In `tools/release_spec.py` since v0.1.6-rc2**, with its own bootloader,
+  partition table (`partitions-4mb.bin`) and app image
+  (`firmware-crowpanel-7.bin`) — it is the board that made the spec grow a
+  per-board partition table.
+- **The app fills ~85% of its 1,966,080 B OTA slot** (1.67 MB), against 2.4x
+  headroom on the 16 MB boards. Watch `Flash:` in the build output on this env:
+  outgrowing a slot on 4 MB leaves only a single factory app with no OTA.
 
 ## Hardware facts (verified against Waveshare wiki + demo, do not "fix")
 

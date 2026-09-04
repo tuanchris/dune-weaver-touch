@@ -1,9 +1,16 @@
 # Releasing
 
-Dune Weaver Touch ships **two panels from one tree**: `waveshare-5b-release`
-(5B, 1024×600) and `waveshare-7` (the 5 and the 7, 800×480). Every release
-carries an app image for each — `firmware.bin` and `firmware-800x480.bin` —
-plus the bootloader, partition table and otadata they share. Releases are
+Dune Weaver Touch ships **three boards from one tree**: `waveshare-7` (the
+Waveshare 5 and 7, 800×480), `crowpanel-adv-5` (Elecrow CrowPanel Advance 5.0)
+and `crowpanel-7` (the original Elecrow CrowPanel 7.0-HMI, the only 4 MB
+board). Every release carries an app image and a bootloader for each — those
+differ on all three — plus a partition table (`partitions.csv` for the 16 MB
+boards, `partitions-4mb.csv` for the 7.0-HMI) and one otadata they all share.
+
+The Waveshare **5B** (1024×600, `firmware.bin`) was dropped in v0.1.6-rc2:
+the web installer has never offered it, so no release since v0.1.5 was
+installable on one. Its envs still build. A 5B in the field now 404s its
+update check, which fails safe. Put it back in `BOARDS` and the image returns. Releases are
 published as **GitHub Release assets** on `tuanchris/dune-weaver-touch`, and
 the `.bin`s and `manifest.json` are also committed to `releases/<tag>/` on
 `main`, which is what the web installer reads.
@@ -24,8 +31,21 @@ It fails the release if any image is missing, mis-sized or mis-hashed; if
 anything at the app offset is not an app image of this project **at this
 version**; if a `.bin` in the directory is not reachable from the manifest; if
 a choice installs an image that does not exist, or an image nothing installs;
-if a board in `BOARDS` is not offered; or if both panels somehow got the same
-binary.
+if a board in `BOARDS` is not offered, or is missing any of the four images it
+installs, or has one at the wrong offset; or if two boards somehow got the same
+app binary.
+
+A board is required only of releases at or after its **`since`**, which is a
+version string (`"v0.1.6-rc2"`), compared with `version_key()` — a published
+release cannot grow a board that did not exist when it was built. The key
+orders a prerelease *before* its final release, so a board added in rc2 does
+not fail the rc1 already on the server. Without that, adding a board mid-cycle
+would mean skipping a version number to dodge the comparison. Getting that
+wrong is how `check-releases.yml` sat red from v0.1.5 to v0.1.6-rc1: adding the
+CrowPanel Advance made v0.1.3 and v0.1.4 fail retroactively, and only the
+Release workflow was being watched. **Check both workflows after a tag.**
+Genuinely unfixable published releases are listed in `KNOWN_BROKEN` and
+reported without failing — v0.1.4 is there, and it is the only one.
 
 `build_release.py` runs it before declaring success, the release workflow
 re-runs it on the copy committed to `main`, and `check-releases.yml` runs it
@@ -63,8 +83,8 @@ One-line summary of the release.
 Verified on hardware: <what actually ran on the board>.
 
 Install: flash `bootloader.bin` @ `0x0`, `partitions.bin` @ `0x8000`, and
-`firmware.bin` @ `0x10000` (esp32s3, 16MB, 80m), or point an ESP Web Tools
-installer at `manifest.json`.
+the board's own app image @ `0x20000` (esp32s3, 80m), or point an ESP Web
+Tools installer at `manifest.json`.
 EOF
 git push origin v0.1.1
 ```
@@ -110,7 +130,11 @@ python3 tools/build_release.py -v     # verbose pio output
 ```
 
 The tag comes from `DW_RELEASE_TAG` if set, else `git describe`. `release/` is
-gitignored. Flash offsets live in `IMAGES` in `tools/release_spec.py` and mirror
+gitignored. Each board in `BOARDS` names its env and the files that env
+contributes; `board_images()` is the single place that says what a board is
+made of, and both the builder and the checker read it, so adding a board is a
+spec edit rather than a new block in the builder. Flash offsets live beside it
+in `tools/release_spec.py` and mirror
 `.pio/build/waveshare-5b/flasher_args.json` — if the partition table moves,
 re-read that file rather than editing the offsets from memory. Note the S3 boots
 its bootloader from `0x0`, not the `0x1000` you may remember from the ESP32.
@@ -172,7 +196,7 @@ into the tracked `releases/<tag>/` on the default branch.
   version shows up in the picker (that list comes from the API, which *is*
   CORS-enabled) and then the manifest 404s. If someone reports that, check the
   branch, not the release.
-- **A release whose manifest does not offer both panels is worse than
+- **A release whose manifest does not offer every panel is worse than
   invisible** — the version installs, and the wrong half of the owners get an
   unreadable screen. `tools/check_release.py` is the backstop; do not publish
   past it.
