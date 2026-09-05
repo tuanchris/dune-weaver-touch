@@ -1,4 +1,4 @@
-// Elecrow CrowPanel 7.0-HMI board support -- the ORIGINAL 7" (DIS07070H),
+// Elecrow CrowPanel 7.0-HMI board support -- the ORIGINAL 7" (DIS08070H),
 // not the Advance series and not the Waveshare 7. Compiled only for
 // -DBOARD_CROWPANEL_7; board.c (Waveshare) and board_crowpanel5.c (Advance)
 // are #if'd out for this env.

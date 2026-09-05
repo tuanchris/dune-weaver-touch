@@ -266,7 +266,7 @@ it does NOT set `BOARD_WAVESHARE_7`. Pin map from Elecrow's factory code
 
 ## Elecrow CrowPanel 7.0-HMI (env `crowpanel-7`)
 
-The ORIGINAL CrowPanel 7" (DIS07070H; Elecrow wiki "ESP32 Display-7.0 inch
+The ORIGINAL CrowPanel 7" (DIS08070H; Elecrow wiki "ESP32 Display-7.0 inch
 Intelligent Touch Screen"). NOT the Advance series and NOT the Waveshare 7,
 and none of their pin maps apply. `src/board/board_crowpanel7.c` replaces
 `board.c` for this env. 800x480 RGB on an ESP32-S3-WROOM-1-N4R8 -- **4 MB

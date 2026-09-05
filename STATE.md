@@ -1,5 +1,47 @@
 # STATE — 2026-08-27
 
+## v0.1.6: four boards, each with its own image (2026-09-05)
+
+Cut as v0.1.6 after three RCs. The release shape is now fully declarative --
+`tools/release_spec.py` `BOARDS` names, per board, its env and every file that
+env contributes (app image, bootloader, partition table), `board_images()` is
+the one place that answers "what is this board made of", and both
+`build_release.py` and `check_release.py` read it. Adding a board is a spec
+edit; there are no per-board blocks in the builder any more.
+
+Four boards ship: Waveshare 7, Waveshare 5, CrowPanel Advance 5.0, CrowPanel
+7.0-HMI. The **Waveshare 5B was dropped** (rc2) -- the web installer never
+offered it, so no release since v0.1.5 was installable on one; a 5B in the
+field now 404s its update check, which fails safe. Its envs still build, and
+putting it back in `BOARDS` restores the image and nothing else.
+
+Two checker bugs found by the boards that exposed them, both fixed:
+
+- **`since` per board.** One global cutoff meant adding a board failed every
+  older published release retroactively -- which is why `check-releases.yml`
+  sat red from v0.1.5 to v0.1.6-rc1 while only the Release workflow was being
+  watched. It is a version STRING now, ordered by `version_key()`, which sorts
+  a prerelease before its release so a board added in rc2 does not fail rc1.
+- **`aka`.** `name` was doing two jobs, installer label and checker identity,
+  and they diverge the moment a panel is renamed. Published manifests cannot
+  be edited, so renaming "ESP32-S3-Touch-LCD-7 or -5" turned four releases red
+  until the checker learned to accept any name a board has shipped under.
+  `build_manifest` never emits an old name.
+
+**Waveshare 5 verified on hardware (2026-09-03, glass confirmed 2026-09-05):**
+clean boot, panel up at 800x480 @ 16 MHz, GT911 answering, card mounted at 29.8
+GB, 1232 patterns off the SD manifest, heap flat at 133 KB internal / 4147 KB
+PSRAM. **Circles are round**, which settles the square-pixel bet: the 5 must
+not set `BOARD_WAVESHARE_7`, and `TH_PX_ASPECT_X1000` stays 1000 there. Before
+rc3 the 5 had no image of its own and installed the 7's 7.6% correction.
+
+**Open:**
+- CrowPanel Advance v1.1 backlight ladder is reasoned, not measured -- no v1.1
+  board here. Dimming stays v1.2+ only.
+- CrowPanel 7.0: drift/flicker at 16 MHz unmeasured; TF card never tried;
+  `screen_sleep` still does not call `board_backlight_level`.
+- The 7.0 app fills 85% of its 1,966,080 B OTA slot. Watch that number.
+
 ## CrowPanel 7.0-HMI brought up; a 16 MB image on 4 MB flash is a silent reboot loop (2026-09-03)
 
 James's bench panel is the ORIGINAL Elecrow CrowPanel 7.0 (N4R8: 4 MB flash),

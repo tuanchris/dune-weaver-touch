@@ -122,11 +122,11 @@ BOARDS = [
         # deliberately omits BOARD_WAVESHARE_7 and lands on
         # TH_PX_ASPECT_X1000 = 1000.
         #
-        # UNTESTED on hardware, and shipped anyway because the alternative is
-        # worse: through v0.1.6-rc2 no release carried this image at all, so a
-        # 5 owner installed the 7's and drew circles 7.6% out of round. If they
-        # are still not round on a real 5, theme.h TH_PX_ASPECT_X1000 is the
-        # first thing to check.
+        # Verified on hardware 2026-09-03 (boot, touch, card, and circles
+        # round on the glass), which settles the square-pixel bet this entry
+        # was added on. Through v0.1.6-rc2 no release carried this image at
+        # all, so a 5 owner installed the 7's and drew circles 7.6% out of
+        # round; that is what it exists to fix.
         #
         # Own bootloader rather than the 7's -- see the note above OTADATA.
         "name": "ESP32-S3-Touch-LCD-5",
@@ -155,7 +155,7 @@ BOARDS = [
         "partitions": PARTITIONS_16MB,
     },
     {
-        # The ORIGINAL CrowPanel 7.0 (DIS07070H), not the Advance series and
+        # The ORIGINAL CrowPanel 7.0 (DIS08070H), not the Advance series and
         # not the Waveshare 7. The only 4 MB board: a 16 MB image header
         # asserts in flash init and reboot-loops, so its partition table AND
         # bootloader are its own. That is the whole reason this spec grew a
